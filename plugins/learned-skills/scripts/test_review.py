@@ -5,6 +5,7 @@ Run: python3 scripts/test_review.py
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -71,6 +72,47 @@ class Transcripts(unittest.TestCase):
         self.assertEqual(new_end, os.path.getsize(self.path))
         capped, _ = review.digest(self.path, 0, 40)
         self.assertEqual(capped, "[earlier turns cut]\n" + review.digest(self.path, 0, 200_000)[0][-40:])
+
+    def test_a_cut_through_a_key_never_leaves_its_body(self):
+        """The digest keeps its tail; redacted only after the cut, a cut that dropped a key's
+        BEGIN line would leave the body with nothing for the header-dependent rule to match.
+        At each cap the cut lands mid-body: digest's own cut, and gather's final cut across two
+        transcripts (at 500 the older transcript's own digest cut comes first)."""
+        body = "".join(f"K{i:03d}q7Xr2Lm9" for i in range(150))  # 1800 chars, under TEXT_CAP
+        key = f"-----BEGIN RSA {'PRIVATE'} KEY-----\n{body}\n-----END RSA {'PRIVATE'} KEY-----"
+        older = os.path.join(self.tmp.name, "older.jsonl")
+
+        def user(text):
+            return json.dumps({"type": "user", "message": {"content": text}}) + "\n"
+
+        def build(via, cap, x):
+            """The key, then filler: whole 2000-char turns short of the cap, and one of x chars."""
+            fill = "".join(user("f" * 2000) for _ in range(max(0, cap // 2008 - 1))) + user("f" * x)
+            if via == "digest":
+                write(self.path, user(f"the key: {key} after-key") + fill)
+                return lambda c: review.digest(self.path, 0, c)[0]
+            write(older, user(f"the key: {key} after-key"))
+            os.utime(older, (1, 1))
+            write(self.path, fill)
+            return lambda c: review.gather({"transcripts": [older, self.path], "offsets": {}}, c)[0]
+
+        for cap in (500, 200_000):
+            for via in ("digest", "gather"):
+                with self.subTest(cap=cap, via=via):
+                    with mock.patch.object(review, "redact", lambda t: t):  # the layout only
+                        full = build(via, cap, 1)(10**9)
+                        # The filler length that puts the cut on a chunk well inside the body.
+                        x, chunk = next((1 + cap - (len(full) - full.index(f"K{i:03d}")), i)
+                                        for i in range(140, 10, -1)
+                                        if 1 <= 1 + cap - (len(full) - full.index(f"K{i:03d}")) < 2000)
+                        full = build(via, cap, x)(10**9)
+                        self.assertEqual(len(full) - cap, full.index(f"K{chunk:03d}"))
+                    # Unredacted, this cut lands on that chunk. Redacted per block first, the
+                    # whole body is gone before any cut, and the text after the block survives.
+                    text = review.redact(build(via, cap, x)(cap))  # as main() redacts it after
+                    survived = re.findall(r"K\d{3}q7Xr2Lm9", text)
+                    self.assertEqual(survived, [], f"{len(survived)} key-body chunks survived the cut")
+                    self.assertIn("[withheld: private-key] after-key", text)
 
     def test_session_labels(self):
         paths = [f"{self.tmp.name}/{name}.jsonl" for name in ("SESSION_A", "SESSION_B")]
@@ -253,7 +295,7 @@ class Apply(unittest.TestCase):
         self.assertEqual(seen["env"].get(common.GUARD_ENV), "1")
         self.assertNotIn("CLAUDE_PROJECT_DIR", seen["env"])
 
-    def test_credentials_in_the_session_never_reach_the_reviewer(self):
+    def test_known_credential_shapes_are_redacted_before_the_reviewer_reads_the_digest(self):
         """Credentials pasted into the session never reach the reviewer or digest.md. Each key
         shape's body is withheld, and the text after its block survives."""
         aws = "AKIA" + "ABCDEFGHIJKLMNOP"

@@ -311,16 +311,41 @@ class Flow(unittest.TestCase):
         self.assertIn("learnings/from-other-lane.md", files)
         self.assertTrue(any(f.endswith("-two.md") for f in files), files)
 
-    def test_no_sink_keeps_records_pending_until_one_is_set(self):
-        self.config(kind="record")
-        self.run_review(lambda w, r: write(f"{r}/early.md", RECORD.format(s="early")))
-        pend = os.path.join(common.state_dir(self.proj), "sink-pending")
-        self.assertTrue(os.listdir(pend))
+    def unreachable_sink(self):
+        return dict(self.sink_cfg(), repo=None, url=f"{self.tmp.name}/no-such-remote.git")
+
+    def test_no_sink_stages_nothing(self):
+        import contextlib
+        import io
+        for kind in ("record", "both"):
+            self.config(kind=kind)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.run_review(lambda w, r: (write(f"{r}/early.md", RECORD.format(s="early")),
+                                              write(f"{w}/learned-good/SKILL.md", GOOD.format(n="learned-good"))))
+            self.assertIn("recorded early", out.getvalue())
+            self.assertNotIn("sink", out.getvalue())
+            self.assertFalse(os.path.exists(os.path.join(common.state_dir(self.proj), "sink-pending")))
         self.config(kind="record", sink=self.sink_cfg())
         self.run_review(lambda w, r: write(f"{r}/late.md", RECORD.format(s="late")))
         files = self.remote_files()
-        self.assertTrue(any(f.endswith("-early.md") for f in files), files)
         self.assertTrue(any(f.endswith("-late.md") for f in files), files)
+        self.assertFalse(any(f.endswith("-early.md") for f in files), files)  # never queued
+
+    def test_configured_sink_keeps_items_pending_until_it_can_take_them(self):
+        pend = os.path.join(common.state_dir(self.proj), "sink-pending")
+        self.config(kind="record", sink={"repo": self.sinkrepo})  # incomplete: no branch
+        self.run_review(lambda w, r: write(f"{r}/early.md", RECORD.format(s="early")))
+        self.assertEqual(len(os.listdir(pend)), 1)
+        self.config(kind="record", sink=self.unreachable_sink())
+        self.run_review(lambda w, r: write(f"{r}/middle.md", RECORD.format(s="middle")))
+        self.assertEqual(len(os.listdir(pend)), 2)
+        self.config(kind="record", sink=self.sink_cfg())
+        self.run_review(lambda w, r: write(f"{r}/late.md", RECORD.format(s="late")))
+        files = self.remote_files()
+        for name in ("early", "middle", "late"):
+            self.assertTrue(any(f.endswith(f"-{name}.md") for f in files), (name, files))
+        self.assertEqual(os.listdir(pend), [])
 
     def test_record_prompt_keeps_the_ownership_split(self):
         self.config(kind="record", sink=self.sink_cfg())
@@ -367,7 +392,7 @@ class Flow(unittest.TestCase):
         self.assertNotIn(FAKE_TOKEN, open(os.path.join(sdir, "notices.jsonl")).read())
 
     def test_u2_queued_items_pass_the_gate_at_push_time(self):
-        self.config(kind="record")  # no sink, no filter: items queue
+        self.config(kind="record", sink=self.unreachable_sink())  # no filter: items queue
         self.run_review(lambda w, r: write(f"{r}/acme.md", RECORD.format(s="ACME broke")))
         write(self.filter, "#!/bin/sh\ngrep -qi acme \"$@\" && exit 1\nexit 0\n")
         os.chmod(self.filter, 0o755)
@@ -380,7 +405,7 @@ class Flow(unittest.TestCase):
                          os.path.isdir(os.path.join(common.state_dir(self.proj), "sink-pending")) else [], [])
 
     def test_u2_pending_is_bounded(self):
-        self.config(kind="record", max_pending=3)
+        self.config(kind="record", max_pending=3, sink=self.unreachable_sink())
         for i in range(5):
             self.run_review(lambda w, r, i=i: write(f"{r}/n{i}.md", RECORD.format(s=f"err {i}")))
         pend = os.path.join(common.state_dir(self.proj), "sink-pending")

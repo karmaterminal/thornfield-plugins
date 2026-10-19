@@ -44,22 +44,28 @@ def clip(s, n):
     return s if len(s) <= n else s[:n] + f" …[{len(s) - n} more chars]"
 
 
+def shown(s, n):
+    """One rendered block for the digest: redacted whole, then clipped. A rule such as
+    private-key needs its header, which a clip, or a later cut to the digest's tail, can drop."""
+    return clip(redact(str(s)), n)
+
+
 def render_blocks(role, content):
     if isinstance(content, str):
-        return [f"{role.upper()}: {clip(content, TEXT_CAP)}"]
+        return [f"{role.upper()}: {shown(content, TEXT_CAP)}"]
     out = []
     for b in content or []:
         t = b.get("type") if isinstance(b, dict) else None
         if t == "text":
-            out.append(f"{role.upper()}: {clip(b.get('text', ''), TEXT_CAP)}")
+            out.append(f"{role.upper()}: {shown(b.get('text', ''), TEXT_CAP)}")
         elif t == "tool_use":
-            out.append(f"TOOL {b.get('name')}: {clip(json.dumps(b.get('input'), ensure_ascii=False), TOOL_CAP)}")
+            out.append(f"TOOL {b.get('name')}: {shown(json.dumps(b.get('input'), ensure_ascii=False), TOOL_CAP)}")
         elif t == "tool_result":
             c = b.get("content")
             if isinstance(c, list):
                 c = " ".join(x.get("text", "") for x in c if isinstance(x, dict))
             tag = "RESULT (error)" if b.get("is_error") else "RESULT"
-            out.append(f"{tag}: {clip(c, RESULT_CAP)}")
+            out.append(f"{tag}: {shown(c, RESULT_CAP)}")
     return out
 
 
@@ -418,7 +424,8 @@ def main():
         return
     state = common.load_state(sdir)
     text, new_offsets = gather(state, cfg["max_digest_bytes"])
-    # Credentials pasted into the session never reach the reviewer or digest.md.
+    # Each block was redacted before any clip or cut (shown); this pass catches a shape that
+    # only the joined text forms.
     text = redact(text)
     if len(text) < 2000:
         log(f"only {len(text)} chars since the last review; nothing to learn from yet")
@@ -460,7 +467,7 @@ def main():
         return
     out = res.stdout
     log(f"{cfg['engine']} exit {res.returncode}; stderr: {clip(res.stderr, 400)}")
-    log(f"{cfg['engine']} said: {clip(out[-1500:], 1500)}")
+    log(f"{cfg['engine']} said: {clip(redact(out)[-1500:], 1500)}")
     if res.returncode != 0:  # auth, quota, crash: a half-finished run applies nothing
         log(f"nothing applied ({cfg['engine']} exit not 0); the same turns are read again next time")
         return
@@ -483,7 +490,7 @@ def main():
             continue
         verb = ("removed" if not os.path.exists(os.path.join(work, n))
                 else "updated" if os.path.exists(os.path.join(before, n)) else "created")
-        summary = redact(clip(summaries.get(n, ""), 200))
+        summary = clip(redact(summaries.get(n, "")), 200)
         event = dict(sink.plugin_fields(cfg, meta), kind="skill", skill=n, verb=verb, summary=summary)
         skill_write = ({"rel": f"skills/{n}", "delete": True} if verb == "removed"
                        else {"rel": f"skills/{n}", "tree": os.path.join(work, n)})
@@ -528,14 +535,17 @@ def main():
             if why:
                 log(f"record not kept {name}: {why}")
                 continue
-            summary = redact(clip(summaries.get("record:" + name, fields["symptom"]), 200))
+            summary = clip(redact(summaries.get("record:" + name, fields["symptom"])), 200)
             log(f"recorded {name} ({fp}) {summary}")
             notices.append({"ts": time.time(), "verb": "recorded", "skill": name, "summary": summary,
                             "ref": fp})
             sink_items.append(sink.with_context(item, ctx))
-    if sink_items or os.path.isdir(os.path.join(sdir, "sink-pending")):
+    # No sink configured: nothing is staged for one. A configured sink that is incomplete,
+    # unsafe or unreachable keeps its items in sink-pending/ until it can take them.
+    if sink.sink_set(cfg) and (sink_items or os.path.isdir(os.path.join(sdir, "sink-pending"))):
         if not sink.sink_config(cfg) and sink_items:
-            log("no sink is set (or it is unsafe); items kept in sink-pending/ only")
+            log("the sink is incomplete or unsafe (it needs url or repo, a branch, and a path "
+                "inside the repo); items kept in sink-pending/")
         try:
             sref = sink.write_sink(cfg, sdir, sink_items, log)
         except Exception as e:  # never lose the review's own state over the sink

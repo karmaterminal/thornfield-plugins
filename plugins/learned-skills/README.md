@@ -7,12 +7,12 @@ worth keeping? If it did, the review writes or patches a `learned-*` skill in th
 You read it, then keep it or undo it. Nothing happens in a project until you opt it in.
 
 > **What leaves your session, and what it costs.** Each review sends up to `max_digest_bytes`
-> (200 KB by default) of the session transcript, after credential redaction, to a second
+> (200 KB by default) of the session transcript to a second
 > `claude -p` run. That run uses your own Claude account and quota, the same way any `claude -p`
 > call you make does. At the default cadence a review runs after every 8 turns, at most once
-> every 20 minutes, with the `sonnet` model. The text goes nowhere else: no third-party service,
-> no telemetry. Redaction catches known credential shapes, not every secret (see
-> [Privacy and limits](#privacy-and-limits)).
+> every 20 minutes, with the `sonnet` model. Known credential shapes are redacted before the
+> reviewer reads the digest; other secrets are not (see [Privacy and limits](#privacy-and-limits)).
+> The text goes nowhere else: no third-party service, no telemetry.
 
 ## Install
 
@@ -106,16 +106,18 @@ full: the record format, how the sink's private clone works, and the filter cont
 
 ## Privacy and limits
 
-- **Redaction is pattern-based.** Private keys, GitHub, Anthropic, OpenAI, Slack, AWS, Google
-  and Discord tokens, JWTs, SSH key blobs and padded base64 are withheld before the review sees
-  the text, and again in every file, log line, notice and commit the plugin writes. An opaque
-  secret, such as a plain password, matches no pattern. It reaches the review run, and only the
-  review's own instructions keep it out of a skill.
+- **Redaction is pattern-based.** Known credential shapes are redacted before the reviewer
+  reads the digest: private keys (the whole block), GitHub, Anthropic, OpenAI, Slack, AWS,
+  Google and Discord tokens, JWTs, SSH key blobs and padded base64. Each piece of the session is
+  redacted before it is shortened, so a cut can never leave half a key behind. The same scan
+  runs again on every file, log line, notice and commit the plugin writes, including the
+  review's own output. An opaque secret, such as a plain password, matches no pattern. It
+  reaches the review run, and only the review's own instructions keep it out of a skill.
 - **A skill can still be wrong.** A review can learn a bad step from a bad session, or be steered
   by hostile text in the transcript. The safeguards are the checks above, the notice, and undo.
   Read what it writes.
 - **Local state.** Turn counts, transcript offsets, the review log, the last digest, undo copies
-  and items waiting for a sink live in `~/.local/state/learned-skills/` (or `$XDG_STATE_HOME`),
+  and, only when a sink is configured, items waiting for it live in `~/.local/state/learned-skills/` (or `$XDG_STATE_HOME`),
   with `0700` permissions; the digest file is `0600`.
 - **Main session only.** Subagent transcripts aren't read. Long tool output is cut.
 - **No pruning.** Unused learned skills stay until you undo or delete them.

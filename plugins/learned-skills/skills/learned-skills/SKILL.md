@@ -143,7 +143,7 @@ work's subject may leave the organization.
   produced. A git failure while staging fails the write, and the items stay pending. A rejected
   push merges (never rebases); a conflict resets the clone to the remote and lands the pending
   items again on top. Anything that can't land waits in `sink-pending/` (at most `max_pending`,
-  200; the oldest go first), and **every item passes the credential scan and the filter again
+  200; the oldest go first; with no sink configured at all, nothing is staged), and **every item passes the credential scan and the filter again
   when it lands**, so an item queued before a filter was set never skips it.
 - **`filter_command`**: your disclosure check. It gets **every file that would be written**
   (skill files and the event JSON, or the rendered record) as path arguments, with `LEARNED_KIND`,
@@ -152,14 +152,14 @@ work's subject may leave the organization.
   (`filter_timeout_seconds`, 60) or a missing command withholds. On exit 0 its stdout may hold
   one JSON object, merged as `context` into the event or record; anything else on stdout
   withholds. Its output is never logged. Withhold, never admit.
-- **Redaction:** the digest passes the credential scan before the review reads it, so a
-  credential shape pasted into the session reaches neither the reviewer nor `digest.md` (a
-  private key's body too: PEM, encrypted PEM, PGP, JSON-escaped). An opaque password matches no
-  shape and is kept out only by the review's own refusal, as is an over-broad description ("Use
+- **Redaction:** known credential shapes are redacted before the reviewer reads the digest:
+  each rendered block passes the credential scan before any clip or cut to the digest's tail,
+  so a cut can't strip the header a rule needs and leave the body. That covers a private key's
+  body too (PEM, encrypted PEM, PGP, JSON-escaped). An opaque password matches no shape and is kept out only by the review's own refusal, as is an over-broad description ("Use
   for every task") or a body that pipes a download to a shell; `undo` is the recovery. The state
   dir is `0700` and `digest.md` `0600`, like the transcripts it digests. The review's own words
-  (its summaries, and the log of what it said) pass the credential scan too: a match is replaced
-  by `[withheld: RULE]` in commit messages, events, notices and the log. Git calls never prompt
+  (its summaries, and the log of what it said) pass the credential scan too, also before any
+  clip: a match is replaced by `[withheld: RULE]` in commit messages, events, notices and the log. Git calls never prompt
   and time out after 120 s.
 
 ## Memory, skills and shared plugins

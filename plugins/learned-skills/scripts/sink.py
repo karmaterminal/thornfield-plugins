@@ -219,6 +219,15 @@ DEFAULT_BRANCHES = {"main", "master", "trunk", "default"}
 CLONE_MARKER = "learned-skills-sink-clone"  # inside .git/, so it is never committed
 
 
+SINK_ENV = tuple(f"LEARNED_SKILLS_SINK_{k}" for k in ("URL", "REPO", "BRANCH", "PATH"))
+
+
+def sink_set(cfg):
+    """Whether any sink is configured at all (in the config or by LEARNED_SKILLS_SINK_*), usable
+    or not. With none, the review stages nothing for a sink."""
+    return bool(cfg.get("sink")) or any(os.environ.get(k) for k in SINK_ENV)
+
+
 def sink_config(cfg):
     """The sink, with LEARNED_SKILLS_SINK_{URL,REPO,BRANCH,PATH} overriding the config per host.
     None when no sink is set or it is unsafe (a path escaping the repo)."""

@@ -13,6 +13,12 @@ build (0.3.2):
   revert commit.
 - `/learned-skills:learned-review-now` writes its output to the review log as well, so
   `/learned-skills:learned-log` shows it, as the command's text always said.
+- **No sink, no queue.** With no sink configured, a review stages nothing in `sink-pending/`
+  and logs nothing about a sink. A sink that is configured but incomplete, unsafe or
+  unreachable still keeps its items pending until it can take them.
+- Each digest block is redacted before any clip or cut to the digest's tail, so a cut can't
+  strip a private key's header and leave its body; the reviewer's stdout and summaries are
+  redacted before they are clipped, too.
 - **Claude engine only.** The optional Copilot CLI engine (records only) is removed, with its
   transcript reader and the `engine_command` key. `engine` accepts only `claude`.
 - Neutral wording throughout, a README with a data and cost disclosure, and a `license` field in
