@@ -19,7 +19,13 @@ You read it, then keep it or undo it. Nothing happens in a project until you opt
 >   are never copied;
 > - copies of any `context_files` you list in the config (none by default), as they are.
 >
-> The text goes nowhere else: no third-party service, no telemetry.
+> The text goes nowhere else: no third-party service, no telemetry. If you configure a `sink`,
+> the skills and learning records a review writes (not the transcript) go to that git remote too.
+>
+> The review run loads no user or project settings, so an `env` block in your `settings.json`
+> doesn't apply to it. If you route Claude Code through a gateway, Bedrock or Vertex with
+> settings, the review instead uses whatever your shell environment and login give `claude -p`.
+> Set those variables in the environment Claude Code starts from, or don't enable the plugin.
 
 ## Install
 
@@ -158,4 +164,4 @@ skills you don't want, and the state directory `~/.local/state/learned-skills/`.
 ## Credits
 
 The idea follows the skill workshop in [OpenClaw](https://github.com/openclaw/openclaw).
-MIT licensed; see [LICENSE](../../LICENSE).
+MIT licensed; see [LICENSE](LICENSE).
