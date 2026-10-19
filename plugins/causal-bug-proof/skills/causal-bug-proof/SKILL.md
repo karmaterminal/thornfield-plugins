@@ -114,6 +114,10 @@ Write a test that states the behaviour you want, and see it fail now.
 
 - Use real-shaped inputs: captured payloads and realistic data, not values invented to fit the code.
 - Assert the contract, not today's output.
+- Try the other ways into the same code, not only the reported one: other callers, other entry
+  points, other ways to read or write the same data. Put each one that fails in the table from
+  step 2, and add the ones that share this mechanism to the fossil, so the fix has to cover them too.
+  Name the ways in you didn't try.
 - Tell a failure apart from work that never finishes. Give the test a timeout that turns a hang into a
   failure, and say that you did.
 - Add a control case that should pass, so that a broken harness can't pass for the bug.

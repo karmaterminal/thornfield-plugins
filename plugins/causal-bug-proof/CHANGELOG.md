@@ -11,5 +11,6 @@ that version:
 - **Nothing specific to one project.** No test-runner rules, pointers to internal skills or internal
   schema names.
 - **New:** a rule to walk history in a separate git worktree and never discard uncommitted changes,
-  a `git bisect run` template with its exit codes, a `git apply` template for the revert step, a
-  Markdown report template, and a path for sessions without a shell.
+  a check of the other ways into the broken code, a `git bisect run` template with its exit codes,
+  a `git apply` template for the revert step, a Markdown report template, and a path for sessions
+  without a shell.
