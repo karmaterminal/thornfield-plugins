@@ -16,7 +16,9 @@ build (0.3.2):
 - **The reviewer sees only what the README lists.** Only `learned-*` skills are staged for the
   review; other skills reach it as names and descriptions, never their bodies. Its reads are
   scoped to a dedicated `STATE/reviewer/` dir, not the whole state dir. Staging refuses
-  symlinks and special files at every level, so nothing from outside the skills dir is staged.
+  symlinks and special files at every level, so nothing from outside the skills dir is staged,
+  and a learned skill left out that way can't be replaced by the review, in the project or, with
+  `live: false`, in the sink.
 - **No sink, no queue.** With no sink configured, a review stages nothing in `sink-pending/`
   and logs nothing about a sink. A sink that is configured but incomplete, unsafe or
   unreachable still keeps its items pending until it can take them.

@@ -492,6 +492,28 @@ class Flow(unittest.TestCase):
         evs = sorted(f for f in self.remote_files() if f.startswith("learnings/events/"))
         self.assertEqual(json.loads(self.show("team/learnings", evs[-1]))["verb"], "updated")
 
+    def test_live_false_a_left_out_sink_skill_is_never_replaced(self):
+        """A learned dir in the sink that holds a link is not staged, and with live: false no
+        project check stands between the review and the sink: apply must skip that name itself."""
+        sh("git", "-C", self.sinkrepo, "checkout", "-q", "-b", "team/learnings")
+        write(f"{self.sinkrepo}/learnings/skills/learned-linked/SKILL.md", GOOD.format(n="learned-linked"))
+        os.symlink("/etc/hostname", f"{self.sinkrepo}/learnings/skills/learned-linked/ext")
+        sh("git", "-C", self.sinkrepo, "add", "-A")
+        sh("git", "-C", self.sinkrepo, "commit", "-qm", "a linked skill")
+        sh("git", "-C", self.sinkrepo, "push", "-q", "origin", "team/learnings")
+        self.config(kind="skill", live=False, sink=self.sink_cfg())
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.run_review(lambda w, r: write(f"{w}/learned-linked/SKILL.md",
+                                               GOOD.format(n="learned-linked") + "REPLACED\n"))
+        self.assertIn("not staged learned-linked: learned-linked/ext is a symlink", out.getvalue())
+        self.assertIn("not applied learned-linked: it was not staged", out.getvalue())
+        self.assertNotIn("REPLACED", self.show("team/learnings", "learnings/skills/learned-linked/SKILL.md"))
+        self.assertIn("learnings/skills/learned-linked/ext", self.remote_files())
+        self.assertFalse(any(f.startswith("learnings/events/") for f in self.remote_files()))
+
     # ---- same-second names ----
 
     def test_u11_same_stamp_events_and_records_all_land(self):

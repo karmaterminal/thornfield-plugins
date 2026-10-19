@@ -40,7 +40,8 @@ Facts about people, preferences and project state are memory, not skills.
   as a list of names and descriptions, never their bodies.
 - Staging copies regular files and directories only, never following a link. A `learned-*`
   skill that is a symlink, or holds a symlink or special file at any depth, is not staged
-  (`not staged NAME: ...` in the log), and a review that writes that name anyway can't apply it.
+  (`not staged NAME: ...` in the log), and a review that writes that name anyway can't apply it,
+  to the project or to a sink (`not applied NAME: it was not staged`).
   A symlink found in the reviewer dir before the run refuses the review.
 - It commits only with `"commit": true`, to whatever git repo the skills dir sits in, and never
   pushes. Even then it never commits on a detached HEAD or during a merge, rebase, cherry-pick,

@@ -105,8 +105,9 @@ full: the record format, how the sink's private clone works, and the filter cont
   listed above) and edit only the staged learned skills and its record staging there. The rest
   of the state directory (the log, undo copies, a sink's clone) is outside that directory.
 - Staging copies regular files and directories only. A `learned-*` skill that is a symlink, or
-  holds a symlink or special file at any depth, is not staged at all, and the log says so. A
-  symlinked skill of yours contributes its name only. Before the run starts, the reviewer
+  holds a symlink or special file at any depth, is not staged at all, and the log says so; a
+  review can't replace it either, in the project or in a sink. A symlinked skill of yours
+  contributes its name only. Before the run starts, the reviewer
   directory is checked again, and any symlink there refuses the review.
 - Only `learned-*` directories that pass every check are copied into the project: frontmatter
   with `name` and `description` only (no `allowed-tools`, `hooks` or `model`), no symlinks, a

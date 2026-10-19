@@ -517,7 +517,10 @@ def main():
         if source is None:
             log("live: false and the sink's skills are unreadable; review skipped; the same turns are read next time")
             return
-    for name, why in snapshot(source if cfg["kind"] in ("skill", "both") else None, before):
+    # Names left out of staging (a link or special file inside): apply skips them below, so a
+    # review can't replace a skill it was never shown, in the project or (live: false) the sink.
+    left_out = dict(snapshot(source if cfg["kind"] in ("skill", "both") else None, before))
+    for name, why in left_out.items():
         log(f"not staged {name}: {why}; the review neither sees nor changes it")
     snapshot(before, work)  # before/ holds only plain learned-* trees by now
     snapshot(None, records)  # empty: each review writes only its own new records
@@ -550,6 +553,9 @@ def main():
     for n in (changed_dirs(before, work) if cfg["kind"] in ("skill", "both") else []):
         if not n.startswith(common.PREFIX):
             log(f"ignored {n}: outside {common.PREFIX}*")
+            continue
+        if n in left_out:
+            log(f"not applied {n}: it was not staged ({left_out[n]}), so this review can't replace it")
             continue
         why = check_skill(work, n, cfg["max_skill_bytes"])
         if why:
