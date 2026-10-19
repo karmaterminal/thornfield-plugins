@@ -18,6 +18,7 @@ Then install a plugin by name, for example `/plugin install learned-skills@thorn
 | Plugin | What it does |
 | --- | --- |
 | [learned-skills](plugins/learned-skills/) | Turns repeated work into reviewable skills: a background review of the session writes or patches `learned-*` skills in the project, with a notice and one-command undo. Opt-in per project. Read its README for what it sends to a `claude -p` run. |
+| [causal-bug-proof](plugins/causal-bug-proof/) | Proves a bug's cause instead of guessing it: a fossil test that fails today, a traced code path and history, the smallest fix, and a revert that brings the failure back. Instructions only: no hooks, servers or background runs. |
 
 ## Contributing
 
