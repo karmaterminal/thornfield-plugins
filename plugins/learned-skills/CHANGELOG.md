@@ -25,7 +25,7 @@ build (0.3.2):
 - Each digest block is redacted before any clip or cut to the digest's tail, so a cut can't
   strip a private key's header and leave its body. A key split across messages or reviews is
   withheld too: everything from a `BEGIN` to the whole `END` line with the same label, from
-  the same place (the user's text, the assistant's, or the very tool call, by its id), is
+  the same place (the user's text, Claude's, or the very tool call, by its id), is
   withheld; a nested, mismatched or malformed `END` is body, and a guard of unknown source
   closes at no `END`. JSON line breaks are decided by the JSON parser, also for JSON inside
   prose; nothing outside JSON is unescaped. That state is saved per transcript beside its offset.

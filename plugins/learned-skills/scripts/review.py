@@ -120,7 +120,7 @@ def key_end(label):
     return re.compile(rf"^{END_EDGE}-----END {re.escape(label)}-----{END_EDGE}$", re.M)
 
 
-# Where a key was opened: the user's or the assistant's text, or one tool call's input or result,
+# Where a key was opened: the user's or Claude's text, or one tool call's input or result,
 # by its id. A tool block without an id gets a random one of its own (?UUID), so no other block,
 # in this review or a later one, can close it (a per-process counter repeated across runs).
 SOURCE_RE = re.compile(r"(?:user|assistant|(?:tool_use|tool_result):[A-Za-z0-9._?-]{1,128})")
@@ -148,7 +148,7 @@ class KeyGuard:
         self.open = saved.get("open") is True
         self.label = label if isinstance(label, str) and re.fullmatch(KEY_LABEL, label) else None
         # Where the key was opened (SOURCE_RE). Only an END from that same place closes it: the
-        # user's text, the assistant's, or the very tool call, so one tool result (a fetched
+        # user's text, Claude's, or the very tool call, so one tool result (a fetched
         # page) cannot end a key that another result, or a user turn, opened. Unknown
         # (a 0.3.2 state, or unreadable): nothing closes it but reset-guard.
         self.source = source if isinstance(source, str) and SOURCE_RE.fullmatch(source) else None

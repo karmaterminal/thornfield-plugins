@@ -165,8 +165,8 @@ work's subject may leave the organization.
   body too (PEM, encrypted PEM, PGP, JSON-escaped), and one split across messages or reviews.
   A `BEGIN` opens a key wherever it appears. Everything after it is withheld, across messages
   and reviews, until the whole `END` line with the same label (`BEGIN RSA …` closes only at
-  `END RSA …`; a nested or mismatched one is body) from the same place: the user's text, the
-  assistant's, or the very tool call (by its id), so one fetched page can't end a key pasted
+  `END RSA …`; a nested or mismatched one is body) from the same place: the user's text,
+  Claude's, or the very tool call (by its id), so one fetched page can't end a key pasted
   in a user turn or opened by another tool result. A guard whose source is unknown (saved by
   0.3.2, or unreadable) closes at no `END`, only by reset. An `END` is a whole line only: text
   before or after the marker keeps the key open. In JSON (a whole block, or a JSON document
