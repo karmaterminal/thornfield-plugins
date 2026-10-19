@@ -18,7 +18,8 @@ you.
 In scope: the plugins in `plugins/`, their hooks, scripts and commands, and the marketplace
 manifest. For `learned-skills`, that includes a way to get a credential-shaped string, a
 symlink, or frontmatter beyond `name` and `description` into a project's skills; a way for the
-review run to read or write outside its state directory; or a way to make a hook block or fail
+review run to read or write outside its reviewer directory, or to see a hand-written skill's
+body or anything a symlink points to; or a way to make a hook block or fail
 a session.
 
 Known limits, not vulnerabilities: `learned-skills` redacts credentials by pattern, so an opaque

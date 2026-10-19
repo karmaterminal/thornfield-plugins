@@ -3,6 +3,8 @@
 replaced by a fake that writes into the staging copy the way a steered review could.
 Run: python3 scripts/test_review.py
 """
+import contextlib
+import io
 import json
 import os
 import re
@@ -235,6 +237,10 @@ class Apply(unittest.TestCase):
 
         def run_claude(cfg, sdir, prompt):
             seen["digest"] = open(os.path.join(sdir, "digest.md")).read()
+            seen["prompt"], seen["rdir"] = prompt, sdir
+            seen["staged"] = sorted(os.listdir(os.path.join(sdir, "work")))
+            seen["files"] = {os.path.relpath(os.path.join(r, f), sdir): open(os.path.join(r, f), errors="replace").read()
+                             for r, _, fs in os.walk(sdir) for f in fs}
             fake(os.path.join(sdir, "work"))
             return types.SimpleNamespace(returncode=rc, stdout="LEARNED created learned-good: ok", stderr="")
         review.run_claude = run_claude
@@ -323,7 +329,7 @@ class Apply(unittest.TestCase):
             for role, content in turns:
                 fh.write(json.dumps({"type": role, "message": {"role": role, "content": content}}) + "\n")
         seen = self.run_review(self.good)
-        path = os.path.join(common.state_dir(self.proj), "digest.md")
+        path = os.path.join(common.state_dir(self.proj), "reviewer", "digest.md")
         self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
         for digest in (seen["digest"], open(path).read()):
             self.assertNotIn(FAKE_TOKEN, digest)
@@ -436,6 +442,87 @@ class Apply(unittest.TestCase):
         self.assertIn("review end: nothing learned", r.stdout)
         with open(os.path.join(common.state_dir(self.proj), "review.log")) as fh:
             self.assertIn("review end: nothing learned", fh.read())
+
+    def state_text(self):
+        """Every file under the state dir, path and content, symlinks not followed."""
+        out = []
+        for r, ds, fs in os.walk(common.state_dir(self.proj)):
+            for x in ds + fs:
+                p = os.path.join(r, x)
+                out.append(p)
+                if x in fs and not os.path.islink(p):
+                    out.append(open(p, errors="replace").read())
+        return "\n".join(out)
+
+    def test_a_hand_written_skill_body_never_reaches_the_state_dir(self):
+        write(f"{self.skills}/hand-made/SKILL.md", "---\nname: hand-made\ndescription: Use when "
+              "deploying the HAND-DESC service.\n---\n\n# t\n\nHAND-BODY-PRIVATE-CONTEXT\n")
+        write(f"{self.skills}/hand-made/references/notes.md", "HAND-REFERENCE-PRIVATE\n")
+        write(f"{self.skills}/learned-old/SKILL.md", GOOD.format(n="learned-old"))
+        self.git("add", "-A")
+        self.git("commit", "-qm", "skills")
+        seen = self.run_review(self.good)
+        self.assertEqual(seen["staged"], ["learned-old"])  # only what the review may change
+        self.assertIn("- hand-made: Use when deploying the HAND-DESC service.", seen["prompt"])
+        self.assertIn("contents are not copied here", seen["prompt"])
+        for secret in ("HAND-BODY-PRIVATE-CONTEXT", "HAND-REFERENCE-PRIVATE"):
+            self.assertNotIn(secret, seen["prompt"])
+            self.assertFalse(any(secret in t for t in seen["files"].values()), secret)
+            self.assertNotIn(secret, self.state_text())
+        self.assertEqual(sorted(seen["files"]), ["digest.md", "work/learned-old/SKILL.md"])
+        self.assertTrue(os.path.isdir(f"{self.skills}/learned-good"))  # the review still works
+
+    def test_symlinks_at_every_level_are_refused_and_nothing_outside_is_staged(self):
+        outside = f"{self.tmp.name}/outside"
+        write(f"{outside}/linked-skill/SKILL.md", GOOD.format(n="learned-linkdir") + "OUTSIDE-DIR\n")
+        write(f"{outside}/notes.md", "OUTSIDE-FILE\n")
+        write(f"{outside}/home/.ssh/id_fake", "OUTSIDE-SSH-KEY\n")  # a stand-in for ~/.ssh
+        write(f"{outside}/hand/SKILL.md", "---\nname: shared\ndescription: OUTSIDE-DESC\n---\nOUTSIDE-HAND\n")
+        os.symlink(f"{outside}/linked-skill", f"{self.skills}/learned-linkdir")
+        write(f"{self.skills}/learned-linkfile/SKILL.md", GOOD.format(n="learned-linkfile"))
+        os.symlink(f"{outside}/notes.md", f"{self.skills}/learned-linkfile/references-notes.md")
+        write(f"{self.skills}/learned-ssh/SKILL.md", GOOD.format(n="learned-ssh"))
+        os.makedirs(f"{self.skills}/learned-ssh/deep/er")
+        os.symlink(f"{outside}/home/.ssh", f"{self.skills}/learned-ssh/deep/er/ssh")
+        os.symlink(f"{outside}/missing", f"{self.skills}/learned-broken")
+        os.symlink(f"{outside}/hand", f"{self.skills}/shared")
+        write(f"{self.skills}/learned-plain/SKILL.md", GOOD.format(n="learned-plain"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            seen = self.run_review(lambda work: write(f"{work}/learned-linkdir/SKILL.md",
+                                                      GOOD.format(n="learned-linkdir")))
+        self.assertEqual(seen["staged"], ["learned-plain"])
+        log = out.getvalue()
+        for name, why in (("learned-linkdir", "learned-linkdir is a symlink"),
+                          ("learned-linkfile", "learned-linkfile/references-notes.md is a symlink"),
+                          ("learned-ssh", "learned-ssh/deep/er/ssh is a symlink"),
+                          ("learned-broken", "learned-broken is a symlink")):
+            self.assertIn(f"not staged {name}: {why}", log)
+        self.assertIn("- shared\n", seen["prompt"] + "\n")  # a symlinked skill: its name only
+        text = self.state_text()
+        for secret in ("OUTSIDE-DIR", "OUTSIDE-FILE", "OUTSIDE-SSH-KEY", "OUTSIDE-DESC", "OUTSIDE-HAND"):
+            self.assertNotIn(secret, seen["prompt"])
+            self.assertNotIn(secret, text)
+        self.assertFalse(any(os.path.islink(os.path.join(common.state_dir(self.proj), r, x))
+                             for r, ds, fs in os.walk(common.state_dir(self.proj)) for x in ds + fs))
+        # A review that writes over a link it was never shown can't replace it in the project.
+        self.assertIn("not applied learned-linkdir: it changed in the project", log)
+        self.assertTrue(os.path.islink(f"{self.skills}/learned-linkdir"))
+        with open(f"{outside}/linked-skill/SKILL.md") as fh:
+            self.assertIn("OUTSIDE-DIR", fh.read())
+
+    def test_a_link_in_the_reviewer_dir_refuses_the_review(self):
+        build = review.build_prompt
+
+        def planting(cfg, sdir, *a):
+            prompt = build(cfg, sdir, *a)
+            os.symlink(os.path.expanduser("~"), os.path.join(sdir, "context", "home"))
+            return prompt
+        out = io.StringIO()
+        with mock.patch.object(review, "build_prompt", planting), contextlib.redirect_stdout(out):
+            self.run_review(lambda work: self.fail("the reviewer must not run"))
+        self.assertIn("review refused: 1 symlink(s) or special file(s) in the reviewer dir", out.getvalue())
+        self.assertEqual(common.load_state(common.state_dir(self.proj))["offsets"], {})
 
     def more_turns(self, word):
         with open(self.transcript, "a") as fh:

@@ -146,8 +146,7 @@ class Flow(unittest.TestCase):
 
         def run_claude(cfg, sdir, prompt):
             self.prompt = prompt
-            state = common.state_dir(self.proj)
-            fake(os.path.join(state, "work"), os.path.join(sdir, "work-records"))
+            fake(os.path.join(sdir, "work"), os.path.join(sdir, "work-records"))
             return types.SimpleNamespace(returncode=0, stdout=stdout, stderr="")
         review.run_claude = run_claude
         sys.argv = ["review.py", self.proj, "--now"]
@@ -201,7 +200,7 @@ class Flow(unittest.TestCase):
 
         def fake(work, records):
             self.assertEqual(os.listdir(work), [])
-            self.assertEqual(os.listdir(os.path.join(os.path.dirname(work), "before")), [])
+            self.assertEqual(os.listdir(os.path.join(common.state_dir(self.proj), "before")), [])
             write(f"{records}/clean.md", RECORD.format(s="synthetic method friction"))
         self.run_review(fake)
         self.assertTrue(any(f.endswith("-clean.md") for f in self.remote_files()))

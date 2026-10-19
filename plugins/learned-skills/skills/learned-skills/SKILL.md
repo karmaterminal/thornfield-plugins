@@ -34,8 +34,14 @@ Facts about people, preferences and project state are memory, not skills.
   keys are refused). A review whose `claude` exits non-zero applies nothing. A learned skill
   edited while the review ran is left alone.
 - The review runs with no user or project settings, hooks, plugins or MCP servers, and has no
-  shell or web tools. Its file reads and searches are scoped to its own state dir, and its edits
-  and writes to `work/` and `work-records/` there.
+  shell or web tools. Its file reads and searches are scoped to `STATE/reviewer/`, and its edits
+  and writes to `work/` and `work-records/` there. That dir holds only the redacted digest,
+  copies of `context_files`, and copies of the `learned-*` skills. Other skills reach the review
+  as a list of names and descriptions, never their bodies.
+- Staging copies regular files and directories only, never following a link. A `learned-*`
+  skill that is a symlink, or holds a symlink or special file at any depth, is not staged
+  (`not staged NAME: ...` in the log), and a review that writes that name anyway can't apply it.
+  A symlink found in the reviewer dir before the run refuses the review.
 - It commits only with `"commit": true`, to whatever git repo the skills dir sits in, and never
   pushes. Even then it never commits on a detached HEAD or during a merge, rebase, cherry-pick,
   revert or bisect, and with `commit_branch` set only on that branch. Otherwise the change stays

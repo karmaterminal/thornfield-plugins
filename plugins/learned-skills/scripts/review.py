@@ -5,9 +5,10 @@ review-now`. Usage: review.py PROJECT_DIR [--now]. Reads every known transcript 
 (state.json `transcripts`) past its saved offset, so turns from an ended or replaced session are
 not lost.
 
-Fail-closed: the reviewer gets no MCP servers, no shell, no web. Claude runs in this project's
-state dir and edits staged skills. After it exits, only learned-* skill dirs that pass the
-checks below are copied into the project; every other change is dropped.
+Fail-closed: the reviewer gets no MCP servers, no shell, no web. Claude runs in STATE/reviewer/,
+which holds the redacted digest, context copies and plain copies of the learned-* skills only,
+and edits the staged skills there. After it exits, only learned-* skill dirs that pass the checks
+below are copied into the project; every other change is dropped.
 """
 import fcntl
 import filecmp
@@ -15,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -94,12 +96,70 @@ def digest(transcript, offset, cap):
 
 
 def snapshot(src, dst):
-    if os.path.exists(dst):
+    """Copies only the learned-* skills of src to dst, the trees the review may change. Other
+    skills are never copied (the review sees their names and descriptions, nothing more). A
+    learned skill that is a symlink, or holds a symlink or special file at any depth, is left out
+    whole, so nothing from outside the skills dir is staged. Returns [(name, why)] left out."""
+    if os.path.lexists(dst):
         shutil.rmtree(dst)
-    if src and os.path.isdir(src):
-        shutil.copytree(src, dst, symlinks=True)
-    else:
+    os.makedirs(dst)
+    skipped = []
+    for name in sorted(os.listdir(src)) if src and os.path.isdir(src) else []:
+        if not name.startswith(common.PREFIX):
+            continue
+        why = copy_plain(os.path.join(src, name), os.path.join(dst, name), name)
+        if why:
+            shutil.rmtree(os.path.join(dst, name), ignore_errors=True)
+            skipped.append((name, why))
+    return skipped
+
+
+def copy_plain(src, dst, rel):
+    """Copies regular files and directories only, never following a link. None, or why not."""
+    st = os.lstat(src)
+    if stat.S_ISLNK(st.st_mode):
+        return f"{rel} is a symlink"
+    if stat.S_ISDIR(st.st_mode):
         os.makedirs(dst)
+        for name in sorted(os.listdir(src)):
+            why = copy_plain(os.path.join(src, name), os.path.join(dst, name), f"{rel}/{name}")
+            if why:
+                return why
+        return None
+    if not stat.S_ISREG(st.st_mode):
+        return f"{rel} is not a regular file"
+    fd = os.open(src, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as a, open(dst, "wb") as b:
+        shutil.copyfileobj(a, b)
+    return None
+
+
+def links_in(top):
+    """Paths under top that are symlinks or special files: none may reach the reviewer."""
+    bad = []
+    for r, dirs, fs in os.walk(top):
+        for x in dirs + fs:
+            m = os.lstat(os.path.join(r, x)).st_mode
+            if stat.S_ISLNK(m) or not (stat.S_ISDIR(m) or stat.S_ISREG(m)):
+                bad.append(os.path.relpath(os.path.join(r, x), top))
+    return bad
+
+
+def other_skills(source):
+    """`- name: description` for each skill in source that is not learned-*: what the review may
+    know about skills it doesn't own, so it doesn't duplicate them. No body is read, and a
+    symlinked skill or SKILL.md gives its name only."""
+    out = []
+    for d in sorted(os.listdir(source)) if source and os.path.isdir(source) else []:
+        if d.startswith(common.PREFIX):
+            continue
+        p = os.path.join(source, d)
+        sk = os.path.join(p, "SKILL.md")
+        desc = None
+        if not os.path.islink(p) and os.path.isdir(p) and not os.path.islink(sk) and os.path.isfile(sk):
+            desc = common.frontmatter(sk)[1]
+        out.append(f"- {d}: {clip(redact(desc), 300)}" if isinstance(desc, str) and desc.strip() else f"- {d}")
+    return out
 
 
 def changed_dirs(before, after):
@@ -120,7 +180,7 @@ def same_tree(a, b):
 def changed_dirs_one(a, b, name):
     """[name] when entry `name` differs between trees a and b, else []."""
     pa, pb = os.path.join(a, name), os.path.join(b, name)
-    if os.path.exists(pa) != os.path.exists(pb):
+    if os.path.lexists(pa) != os.path.lexists(pb):  # a link, even a broken one, is not "absent"
         return [name]
     if os.path.isdir(pa) and os.path.isdir(pb):
         return [] if same_tree(pa, pb) else [name]
@@ -326,7 +386,8 @@ def parse_summaries(out):
 
 
 def run_claude(cfg, sdir, prompt):
-    """Hermetic: no MCP, no user/project settings or hooks, and tools scoped to the state dir."""
+    """Hermetic: no MCP, no user/project settings or hooks, and tools scoped to `sdir`, the
+    reviewer dir (digest, context copies, staged learned skills, record staging) and no more."""
     mcp = os.path.join(sdir, "no-mcp.json")
     with open(mcp, "w") as fh:
         json.dump({"mcpServers": {}}, fh)
@@ -345,7 +406,7 @@ def run_claude(cfg, sdir, prompt):
                           timeout=cfg["timeout_seconds"])
 
 
-def build_prompt(cfg, sdir, digest_path, work, records=None, source=None):
+def build_prompt(cfg, sdir, digest_path, work, records=None, source=None, staged=None):
     parts = []
     if cfg["kind"] in ("skill", "both"):
         parts.append("review-prompt.md")
@@ -360,10 +421,9 @@ def build_prompt(cfg, sdir, digest_path, work, records=None, source=None):
                 "records about it.\n\n" + tmpl + "End your reply with the RECORDED lines, or the "
                 "single line `RECORDED nothing` when you wrote none.\n")
     source = source or cfg["skills_dir"]
-    existing = common.learned_skills(source)
+    existing = common.learned_skills(staged or work)  # the staged copies, never the project's
     listing = "\n".join(f"- {d}: {desc}" for d, _, desc in existing) or "(none yet)"
-    others = sorted(d for d in os.listdir(source) if not d.startswith(common.PREFIX)) \
-        if os.path.isdir(source) else []
+    others = other_skills(source)
     ctx_dir = os.path.join(sdir, "context")
     shutil.rmtree(ctx_dir, ignore_errors=True)
     os.makedirs(ctx_dir)
@@ -377,7 +437,7 @@ def build_prompt(cfg, sdir, digest_path, work, records=None, source=None):
             .replace("{{RECORDS_DIR}}", records or os.path.join(sdir, "work-records"))
             .replace("{{DIGEST}}", digest_path)
             .replace("{{LEARNED}}", listing)
-            .replace("{{OTHER_SKILLS}}", ", ".join(others) or "(none)")
+            .replace("{{OTHER_SKILLS}}", "\n".join(others) or "- (none)")
             .replace("{{CONTEXT_FILES}}", "\n".join(ctx) or "- (none)")
             .replace("{{MAX_BYTES}}", str(cfg["max_skill_bytes"])))
 
@@ -433,14 +493,18 @@ def main():
     with common.locked_state(sdir) as state:  # a real review: the count starts again
         state["turns"] = 0
         state["last_review"] = time.time()
-    digest_path = os.path.join(sdir, "digest.md")
+    # The reviewer reads only this dir: the digest, context copies, the staged learned skills
+    # and its record staging. Never the log, undo copies, before/ or a sink clone beside it.
+    rdir = os.path.join(sdir, "reviewer")
+    os.makedirs(rdir, mode=0o700, exist_ok=True)
+    digest_path = os.path.join(rdir, "digest.md")
     # 0600 itself, not by umask: the transcripts it digests are 0600 too.
     with os.fdopen(os.open(digest_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as fh:
         fh.write(text)
     os.chmod(digest_path, 0o600)  # O_CREAT's mode applies only to a new file
     # Claude edits staged skills inside its cwd, not a project's sensitive .claude/ tree.
-    before, work = os.path.join(sdir, "before"), os.path.join(sdir, "work")
-    records = os.path.join(sdir, "work-records")
+    before, work = os.path.join(sdir, "before"), os.path.join(rdir, "work")
+    records = os.path.join(rdir, "work-records")
     # The skills the review starts from: the project's, or with live: false the sink's own
     # PATH/skills, so skills build up there (and "updated" means updated) across reviews.
     source = cfg["skills_dir"]
@@ -453,12 +517,18 @@ def main():
         if source is None:
             log("live: false and the sink's skills are unreadable; review skipped; the same turns are read next time")
             return
-    snapshot(source if cfg["kind"] in ("skill", "both") else None, before)
-    snapshot(source if cfg["kind"] in ("skill", "both") else None, work)
+    for name, why in snapshot(source if cfg["kind"] in ("skill", "both") else None, before):
+        log(f"not staged {name}: {why}; the review neither sees nor changes it")
+    snapshot(before, work)  # before/ holds only plain learned-* trees by now
     snapshot(None, records)  # empty: each review writes only its own new records
     log(f"review start: {len(text)} chars from {len(new_offsets)} transcript(s)")
     try:
-        res = run_claude(cfg, sdir, build_prompt(cfg, sdir, digest_path, work, records, source))
+        prompt = build_prompt(cfg, rdir, digest_path, work, records, source, before)
+        bad = links_in(rdir)
+        if bad:  # never expected: the staging above copies plain files only
+            log(f"review refused: {len(bad)} symlink(s) or special file(s) in the reviewer dir; nothing applied")
+            return
+        res = run_claude(cfg, rdir, prompt)
     except OSError as e:
         log(f"review refused: {e}; nothing applied; the same turns are read next time")
         return

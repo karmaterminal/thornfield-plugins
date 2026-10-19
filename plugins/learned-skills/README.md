@@ -6,12 +6,19 @@ worth keeping? If it did, the review writes or patches a `learned-*` skill in th
 `.claude/skills/`, and your next prompt starts with a `💾 Learned` notice that names the skill.
 You read it, then keep it or undo it. Nothing happens in a project until you opt it in.
 
-> **What leaves your session, and what it costs.** Each review sends up to `max_digest_bytes`
-> (200 KB by default) of the session transcript to a second
-> `claude -p` run. That run uses your own Claude account and quota, the same way any `claude -p`
-> call you make does. At the default cadence a review runs after every 8 turns, at most once
-> every 20 minutes, with the `sonnet` model. Known credential shapes are redacted before the
-> reviewer reads the digest; other secrets are not (see [Privacy and limits](#privacy-and-limits)).
+> **What leaves your session, and what it costs.** Each review starts a second `claude -p` run.
+> That run uses your own Claude account and quota, the same way any `claude -p` call you make
+> does. At the default cadence a review runs after every 8 turns, at most once every 20 minutes,
+> with the `sonnet` model. The reviewer can read exactly these, and nothing else:
+>
+> - a digest of the session transcript since the last review, up to `max_digest_bytes` (200 KB by
+>   default), with known credential shapes redacted (other secrets are not; see
+>   [Privacy and limits](#privacy-and-limits));
+> - copies of the project's `learned-*` skills, the only skills it may change;
+> - the **name and description** of each other skill in the skills dir. Their bodies and files
+>   are never copied;
+> - copies of any `context_files` you list in the config (none by default), as they are.
+>
 > The text goes nowhere else: no third-party service, no telemetry.
 
 ## Install
@@ -94,8 +101,13 @@ full: the record format, how the sink's private clone works, and the filter cont
 ## How a review stays contained
 
 - The review run gets no user or project settings, hooks, plugins or MCP servers, and no shell
-  or web tools. It can read only its own state directory and edit only a staging copy of the
-  skills.
+  or web tools. It can read only its reviewer directory (`STATE/reviewer/`, holding the inputs
+  listed above) and edit only the staged learned skills and its record staging there. The rest
+  of the state directory (the log, undo copies, a sink's clone) is outside that directory.
+- Staging copies regular files and directories only. A `learned-*` skill that is a symlink, or
+  holds a symlink or special file at any depth, is not staged at all, and the log says so. A
+  symlinked skill of yours contributes its name only. Before the run starts, the reviewer
+  directory is checked again, and any symlink there refuses the review.
 - Only `learned-*` directories that pass every check are copied into the project: frontmatter
   with `name` and `description` only (no `allowed-tools`, `hooks` or `model`), no symlinks, a
   size cap, and no credential-shaped strings. Every other change is dropped. Skills you wrote
