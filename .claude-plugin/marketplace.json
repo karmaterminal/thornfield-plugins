@@ -18,6 +18,22 @@
         "learning",
         "hooks"
       ]
+    },
+    {
+      "name": "causal-bug-proof",
+      "source": "./plugins/causal-bug-proof",
+      "description": "Proves a bug's cause before you trust the fix. Claude pins the wanted behaviour in a failing test whose assertions never change, traces the code path and the git history (with git bisect where it can), applies the smallest fix, then shows that reverting only the fix brings the failure back. Instructions only: no hooks, servers or scripts, and it sends nothing anywhere.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "category": "development",
+      "homepage": "https://github.com/karmaterminal/thornfield-plugins/tree/main/plugins/causal-bug-proof",
+      "tags": [
+        "debugging",
+        "root-cause",
+        "regression",
+        "git-bisect",
+        "testing"
+      ]
     }
   ]
 }
