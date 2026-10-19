@@ -34,10 +34,19 @@ def log(msg):
     print(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} {redact(str(msg))}", flush=True)
 
 
+def is_json(text):
+    """True for text that is one JSON document (where \\n is an escaped line break)."""
+    try:
+        json.loads(text)
+        return True
+    except ValueError:
+        return False
+
+
 def redact(text):
     """Credential shapes replaced by their rule name. Applied to everything the plugin writes
     from the review's own words: log lines, summaries, commit messages, notices, events."""
-    if KEY_BEGIN.search(text):  # so a JSON-escaped key's END is a line of its own
+    if KEY_BEGIN.search(text) and is_json(text):  # a JSON-escaped key's END as its own line
         text = JSON_EOL.sub("\n", text)
     for rule, rx in SECRET_RULES:
         text = rx.sub(f"[withheld: {rule}]", text)
@@ -65,12 +74,8 @@ def key_end(label):
     return re.compile(rf"^{END_EDGE}-----END {re.escape(label)}-----{END_EDGE}$", re.M)
 
 
-# While a key is open, every base64 run that could be key material (20 or more characters, or 8
-# or more holding a digit, + / or =: PEM and PGP armor lines, split by newlines or by spaces
-# when a key was pasted on one line) is withheld with the separators between such runs. Any
-# other text, a plain word included, is shown, redacted.
-KEY_RUN = re.compile(r"(?:(?<![A-Za-z0-9+/=])(?=[A-Za-z0-9+/=]{20}|[A-Za-z]*[0-9+/=])[A-Za-z0-9+/=]{8,}"
-                     r"(?![A-Za-z0-9+/=])[\s\"',]*)+")
+SOURCES = ("user", "assistant", "tool_use", "tool_result")
+WITHHELD_RUN = re.compile(r"\[withheld: private-key\](?:\s*\[withheld: private-key\])+")
 
 
 class KeyGuard:
@@ -78,73 +83,78 @@ class KeyGuard:
     line with that same label, so a key split over two messages never leaves its body visible
     and a mismatched END closes nothing. Saved with the transcript's offset (state.json
     `key_guard`), so a body read by the next review is withheld too. No size bound, and nothing
-    but the matching END closes it: it fails closed. While open it withholds only lines that
-    could be key material (KEY_RUN) and shows the rest, so a stray BEGIN in prose hides
-    base64-looking runs of that transcript at most, never its ordinary text."""
+    but the matching whole END line, from the same kind of block, closes it: it fails closed.
+    While open it withholds everything. A stray BEGIN in prose therefore hides the rest of that
+    transcript from reviews until `cli.py reset-guard` (logged) clears it."""
 
     def __init__(self, saved=None):
         saved = saved if isinstance(saved, dict) else {}
-        label = saved.get("label")
+        label, source = saved.get("label"), saved.get("source")
         self.open = saved.get("open") is True
         self.label = label if isinstance(label, str) and re.fullmatch(KEY_LABEL, label) else None
+        # Where the key was opened: user, assistant, tool_use or tool_result. Only an END from
+        # the same kind of block closes it, so a tool result (a fetched page, a file) cannot end
+        # a key that was pasted in a user turn. None (0.3.2 state): any source.
+        self.source = source if source in SOURCES else None
 
     def saved(self):
-        return {"open": True, "label": self.label} if self.open else None
+        return {"open": True, "label": self.label, "source": self.source} if self.open else None
 
     @staticmethod
     def inside(text):
-        """`text` from inside an open key: base64 runs withheld, everything else redacted."""
-        # Inside a key, a nested BEGIN marker is part of it: withheld here, so redact() below
-        # does not take it for a new key and swallow the rest of the block.
-        out = KEY_RUN.sub(" [withheld: private-key] ", KEY_BEGIN.sub(" [withheld: private-key] ", text))
-        return " ".join(redact(out).split()) or "[withheld: private-key]"
+        """Everything inside an open key is withheld, whatever it looks like: any rule
+        for "safe" text inside a key has a valid wrapping that defeats it."""
+        return "[withheld: private-key]"
 
 
-def shown(s, n, guard=None):
+def shown(s, n, guard=None, source=None):
     """One rendered block for the digest: redacted whole, then clipped. A rule such as
     private-key needs its header, which a clip, or a later cut to the digest's tail, can drop.
     With a guard, the block is walked in order: text outside a key is redacted, and everything
     from a BEGIN to the whole END line with its label (in this block or a later one) is
-    inside the key: its base64 runs are withheld and anything else in it is shown, redacted
-    (KeyGuard.inside), nested or mismatched BEGIN and END markers included."""
+    inside the key and withheld whole, nested or mismatched BEGIN and END markers included."""
     s = str(s)
     if guard is None:
         return clip(redact(s), n)
-    if guard.open or KEY_BEGIN.search(s):  # END lines are found on real line breaks
+    # JSON-escaped line breaks become real ones (so a JSON-pasted key's END is a line of its
+    # own) in a block that opens a key itself, or in JSON. A later block of plain text keeps
+    # its literal \n: there it cannot fake an END line for a key opened earlier.
+    if KEY_BEGIN.search(s) or (guard.open and (source == "tool_use" or is_json(s))):
         s = JSON_EOL.sub("\n", s)
     out, pos = [], 0
     while pos <= len(s):
         if guard.open:
-            m = key_end(guard.label).search(s, pos) if guard.label else None
+            m = (key_end(guard.label).search(s, pos)
+                 if guard.label and guard.source in (None, source) else None)
             out.append(guard.inside(s[pos:m.start() if m else len(s)]))
             if not m:
                 break
-            guard.open, guard.label, pos = False, None, m.end()
+            guard.open, guard.label, guard.source, pos = False, None, None, m.end()
             continue
         m = KEY_BEGIN.search(s, pos)
         out.append(redact(s[pos:m.start() if m else len(s)]))
         if not m:
             break
-        guard.open, guard.label, pos = True, m.group(1), m.end()
-    return clip(" ".join(out), n)
+        guard.open, guard.label, guard.source, pos = True, m.group(1), source, m.end()
+    return clip(WITHHELD_RUN.sub("[withheld: private-key]", " ".join(out)), n)
 
 
 def render_blocks(role, content, guard=None):
     if isinstance(content, str):
-        return [f"{role.upper()}: {shown(content, TEXT_CAP, guard)}"]
+        return [f"{role.upper()}: {shown(content, TEXT_CAP, guard, role)}"]
     out = []
     for b in content or []:
         t = b.get("type") if isinstance(b, dict) else None
         if t == "text":
-            out.append(f"{role.upper()}: {shown(b.get('text', ''), TEXT_CAP, guard)}")
+            out.append(f"{role.upper()}: {shown(b.get('text', ''), TEXT_CAP, guard, role)}")
         elif t == "tool_use":
-            out.append(f"TOOL {b.get('name')}: {shown(json.dumps(b.get('input'), ensure_ascii=False), TOOL_CAP, guard)}")
+            out.append(f"TOOL {b.get('name')}: {shown(json.dumps(b.get('input'), ensure_ascii=False), TOOL_CAP, guard, 'tool_use')}")
         elif t == "tool_result":
             c = b.get("content")
             if isinstance(c, list):
                 c = " ".join(x.get("text", "") for x in c if isinstance(x, dict))
             tag = "RESULT (error)" if b.get("is_error") else "RESULT"
-            out.append(f"{tag}: {shown(c, RESULT_CAP, guard)}")
+            out.append(f"{tag}: {shown(c, RESULT_CAP, guard, 'tool_result')}")
     return out
 
 
@@ -759,6 +769,21 @@ def main():
                 state["key_guard"][t] = g
             else:
                 state["key_guard"].pop(t, None)
+        for t in state["key_guard"]:
+            log(f"key guard open in {label(t)} ({state['key_guard'][t].get('label')}): its text is "
+                "withheld from reviews until the matching END line, or cli.py reset-guard")
+
+
+def reset_guards(state, transcript=None):
+    """Clears the open key guards (all, or one transcript's), logged: the recovery for a BEGIN
+    that never gets its END, a format note in prose for example. The text after it is then
+    reviewed again from the saved offset on. Returns the transcripts cleared."""
+    guards = state.get("key_guard") if isinstance(state.get("key_guard"), dict) else {}
+    cleared = [t for t in list(guards) if transcript in (None, t)]
+    for t in cleared:
+        del guards[t]
+        log(f"key guard reset for {label(t)} by cli.py reset-guard")
+    return cleared
 
 
 if __name__ == "__main__":

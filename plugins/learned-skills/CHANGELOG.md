@@ -24,11 +24,12 @@ build (0.3.2):
   unreachable still keeps its items pending until it can take them.
 - Each digest block is redacted before any clip or cut to the digest's tail, so a cut can't
   strip a private key's header and leave its body. A key split across messages or reviews is
-  withheld too: from a `BEGIN` to the whole `END` line with the same label (a nested,
-  mismatched or malformed `END` is body), every base64-looking run is withheld and other text
-  is shown, redacted. That state is saved per transcript beside its offset. There is no size
-  bound: only the matching `END` line closes a key, so it fails closed, and a stray `BEGIN` in
-  prose hides only base64-looking runs, never ordinary text. The reviewer's stdout, stderr and
+  withheld too: everything from a `BEGIN` to the whole `END` line with the same label, from
+  the same kind of block (user, assistant, tool input, tool result), is withheld; a nested,
+  mismatched or malformed `END` is body. That state is saved per transcript beside its offset.
+  There is no size bound: only the matching `END` line closes a key, so it fails closed. A
+  stray `BEGIN` keeps the rest of that session out of reviews; `learned-status` shows it, and
+  the new `/learned-skills:learned-reset-guard` clears it (recorded in the review log). The reviewer's stdout, stderr and
   summaries are redacted before they are clipped.
 - **Each saved offset is bound to its transcript file** (device, inode and a hash of its first
   4 KB). A transcript replaced at the same path is read again from the start with a fresh

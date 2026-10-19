@@ -66,6 +66,7 @@ By default the change is only in your working tree. Then:
 | `/learned-skills:learned-log` | The last 40 lines of the review log |
 | `/learned-skills:learned-undo learned-NAME` | Undo the last learned change to one skill |
 | `/learned-skills:learned-review-now` | Run a review now, in the foreground |
+| `/learned-skills:learned-reset-guard` | Clear an open private-key guard (see [Privacy and limits](#privacy-and-limits)) |
 
 The plugin also ships a `learned-skills` skill, so Claude knows how to read a notice, when to
 undo, and how a learned skill differs from memory.
@@ -124,11 +125,15 @@ full: the record format, how the sink's private clone works, and the filter cont
   Google and Discord tokens, JWTs, SSH key blobs and padded base64. Each piece of the session is
   redacted before it is shortened, so a cut can never leave half a key behind. A key pasted
   across several messages, or across two reviews, stays withheld until its own `END` line,
-  however long it is: while it is open, anything that looks like key material is withheld, and
-  ordinary words around it are still shown. The same scan
+  however long it is: everything in between is withheld. The same scan
   runs again on every file, log line, notice and commit the plugin writes, including the
   review's own output. An opaque secret, such as a plain password, matches no pattern. It
   reaches the review run, and only the review's own instructions keep it out of a skill.
+- **A stray `BEGIN … PRIVATE KEY` line pauses reviews of that session.** If one appears with no
+  matching `END` line (in a note about key formats, say), the rest of that session is withheld
+  from reviews, because it can't be told apart from a key. `/learned-skills:learned-status` says
+  so; `/learned-skills:learned-reset-guard` clears it, and the review log records that. Only
+  clear it when no real key is in that session.
 - **A skill can still be wrong.** A review can learn a bad step from a bad session, or be steered
   by hostile text in the transcript. The safeguards are the checks above, the notice, and undo.
   Read what it writes.

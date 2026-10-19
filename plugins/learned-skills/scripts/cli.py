@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """learned-skills: look after the skills the background review learns.
 
-In a session: /learned-skills:learned-status, -log, -undo NAME, -review-now.
+In a session: /learned-skills:learned-status, -log, -undo NAME, -review-now, -reset-guard.
 Directly: python3 PLUGIN/scripts/cli.py ARGS.
 (No bin/ entry: claude.ai-hosted plugins may not ship PATH executables.)
 
@@ -10,10 +10,14 @@ Directly: python3 PLUGIN/scripts/cli.py ARGS.
   undo NAME         restore NAME to before its last learned change (removes it if created),
                     from the review's saved copy if uncommitted, else from git
   review-now        run a review now, in the foreground, of every known transcript
+  reset-guard       clear open private-key guards: after a BEGIN with no END, a transcript's
+                    text is withheld from reviews until its END or this (logged)
 
 Run from the project (or set CLAUDE_PROJECT_DIR). Nothing happens until the project has
 .claude/learned-skills.json.
 """
+import contextlib
+import io
 import os
 import re
 import shutil
@@ -47,6 +51,10 @@ def status(proj):
     print(f"next review after {max(cfg['every_turns'] - st.get('turns', 0), 0)} more turn(s)"
           f" and not before {time.strftime('%H:%M', time.localtime(last + cfg['min_interval_minutes'] * 60))}"
           if last else f"next review after {max(cfg['every_turns'] - st.get('turns', 0), 0)} more turn(s)")
+    guards = st.get("key_guard") if isinstance(st.get("key_guard"), dict) else {}
+    for t, g in guards.items():
+        print(f"key guard open in {review.label(t)} ({(g or {}).get('label')}): its text is withheld"
+              " from reviews until the matching END line; clear with reset-guard")
     skills = common.learned_skills(cfg["skills_dir"])
     print(f"{len(skills)} learned skill(s)")
     for d, _, desc in skills:
@@ -129,6 +137,16 @@ def main():
                 print("".join(fh.readlines()[-n:]), end="")
     elif args[0] == "undo" and len(args) == 2:
         undo(proj, args[1])
+    elif args[0] == "reset-guard" and len(args) == 1:
+        need_config(proj)
+        sdir = common.state_dir(proj)
+        out = io.StringIO()  # the reset's log lines, here and in review.log, so it is on record
+        with common.locked_state(sdir) as st, contextlib.redirect_stdout(out):
+            cleared = review.reset_guards(st)
+        with open(os.path.join(sdir, "review.log"), "a") as log:
+            log.write(out.getvalue())
+        sys.stdout.write(out.getvalue())
+        print(f"cleared {len(cleared)} key guard(s)" + "".join(f"\n  {review.label(t)}" for t in cleared))
     elif args[0] == "review-now":
         need_config(proj)
         if not common.load_state(common.state_dir(proj))["transcripts"]:

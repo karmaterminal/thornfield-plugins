@@ -163,16 +163,18 @@ work's subject may leave the organization.
   each rendered block passes the credential scan before any clip or cut to the digest's tail,
   so a cut can't strip the header a rule needs and leave the body. That covers a private key's
   body too (PEM, encrypted PEM, PGP, JSON-escaped), and one split across messages or reviews.
-  A `BEGIN` opens a key wherever it appears. From there to the `END` with the same label
-  (`BEGIN RSA …` closes only at `END RSA …`; a nested or mismatched one is body), across
-  messages and reviews, every base64-looking run is withheld and any other text is shown,
-  redacted. An `END` closes only as a whole line, once JSON-escaped newlines are real ones:
-  text before or after the marker on its line keeps the key open. There is no size bound, so
-  it fails closed: a stray `BEGIN` in prose costs base64-looking runs of that transcript, never
-  its ordinary text. That state is kept in `state.json` (`key_guard`) beside the offset, which
-  is bound to the file it was read from (`ident`: dev, inode and a hash of its first 4 KB, so a
-  transcript replaced at the same path is read again from the start, guard reset). An opaque
-  password matches no shape and is kept out only by the review's own refusal, as is an over-broad description ("Use
+  A `BEGIN` opens a key wherever it appears. Everything after it is withheld, across messages
+  and reviews, until the whole `END` line with the same label (`BEGIN RSA …` closes only at
+  `END RSA …`; a nested or mismatched one is body) from the same kind of block (user,
+  assistant, tool input, tool result: a fetched page can't end a key pasted in a user turn).
+  An `END` is a whole line only: text before or after the marker keeps the key open. A
+  literal `\n` counts as a line break only in a block that opens the key itself, or in JSON.
+  There is no size bound: it fails closed. A stray `BEGIN` (a format note in prose, say) keeps
+  the rest of that transcript out of reviews; `status` says so, and
+  `/learned-skills:learned-reset-guard` (`cli.py reset-guard`, logged) clears it. The state is
+  kept in `state.json` (`key_guard`) beside the offset, which is bound to the file it was read
+  from (`ident`: dev, inode and a hash of its first 4 KB, so a transcript replaced at the same
+  path is read again from the start, guard reset). An opaque password matches no shape and is kept out only by the review's own refusal, as is an over-broad description ("Use
   for every task") or a body that pipes a download to a shell; `undo` is the recovery. The state
   dir is `0700` and `digest.md` `0600`, like the transcripts it digests. The review's own words
   (its summaries, and the log of what it said) pass the credential scan too, also before any
