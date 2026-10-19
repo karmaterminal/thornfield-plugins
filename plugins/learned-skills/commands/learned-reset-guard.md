@@ -1,10 +1,18 @@
 ---
-description: Learned skills - clear open private-key guards (text after a BEGIN with no END is withheld from reviews)
-allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py":*)
+description: Learned skills - list open private-key guards, or clear one session's (logged)
+argument-hint: "[SESSION-ID]"
 ---
 
-Report this output to the user as it is, then stop. A private-key BEGIN with no matching END line
-keeps the rest of its transcript out of reviews; this clears that, and the log records it. Only
-run it when no real key is in that transcript.
+List or clear the open private-key guards for: $ARGUMENTS
 
-!`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" reset-guard`
+A private-key BEGIN with no matching END line keeps the rest of its transcript out of reviews.
+Clearing one lets that transcript's new text be reviewed again; it never replays what was held.
+
+1. With no session id in the request, run with the Bash tool
+   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" reset-guard`, report its output as it is, and stop.
+2. Otherwise the id must match `^[A-Za-z0-9._-]{1,128}$` exactly, and only one may be given. If
+   not, stop and ask for one session id as the listing shows it. Never put anything else on the
+   command line. Before clearing, say that it should only be done when no real key was pasted in
+   that session.
+3. Run, the id in single quotes: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/cli.py" reset-guard 'ID'`
+4. Report its output as it is.

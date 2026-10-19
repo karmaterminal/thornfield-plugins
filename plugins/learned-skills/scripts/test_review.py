@@ -199,14 +199,18 @@ class Transcripts(unittest.TestCase):
     def test_a_json_escaped_end_line_still_closes(self):
         """A JSON-escaped key has no real newline: its END is followed by a literal \\n or a quote."""
         m, b = self.marker, self.SPLIT_BODY
-        for tail, closes in (("\\n", True), ("\\\\n", True), ("\\r\\n", True),
+        # The JSON parser decides what is a line break: \\n is one, but \\\\n is an
+        # escaped backslash and then the letter n, so that END is not a whole line.
+        for tail, closes in (("\\n", True), ("\\r\\n", True), ("\\\\n", False),
                              # the END then more of the same line is not a whole END line: the
                              # rest of that block is withheld too (fail closed), never the body shown
-                             ('"', False), ('\\"', False)):
+                             ('"', False),
+                             # an escaped quote ends the JSON value's line after the marker
+                             ('\\"', True)):
             with self.subTest(tail=tail):
-                text = review.redact(f'{{"k": "{m("BEGIN", "RSA")}\\n{b}\\n{m("END", "RSA")}{tail}", "after": 1}}')
+                text = review.redact(f'{{"k": "{m("BEGIN", "RSA")}\\n{b}\\n{m("END", "RSA")}{tail}", "after": "yes"}}')
                 self.assertNotIn(b, text)
-                self.assertEqual('"after": 1' in text, closes)
+                self.assertEqual("after" in text, closes)
 
     def test_the_single_block_rule_pairs_begin_with_its_own_end(self):
         """redact() alone (logs, summaries, check_skill's scan): BEGIN X runs to END X."""
@@ -258,10 +262,15 @@ class Transcripts(unittest.TestCase):
         state = {"transcripts": [self.path], "offsets": offsets, "key_guard": guards,
                  "ident": {self.path: review.identity(self.path, offsets[self.path])}}
         self.assertNotIn("m05", review.gather(dict(state), 10**6, {})[0])
+        other = os.path.join(os.path.dirname(self.path), "other.jsonl")
+        state["key_guard"][other] = {"open": True, "label": "RSA PRIVATE KEY", "source": "user"}
         with mock.patch.object(review, "log") as logged:
-            cleared = review.reset_guards(state)
+            self.assertEqual(review.reset_guards(state, "nope"), [])
+            cleared = review.reset_guards(state, review.label(self.path))
         self.assertEqual(cleared, [self.path])
         logged.assert_called_once()
+        # resetting one stray BEGIN never releases another transcript's real key
+        self.assertIn(other, state["key_guard"])
         self.assertIn("m05 the next review", review.gather(state, 10**6, {})[0])
 
     def test_an_end_from_another_kind_of_block_closes_nothing(self):
@@ -296,6 +305,60 @@ class Transcripts(unittest.TestCase):
         for line in lines:
             self.assertNotIn(line, text)
         self.assertIn("[withheld: private-key] after-end", text)
+
+    def test_an_escaped_backslash_n_never_forges_an_end_line(self):
+        """In JSON, \\\\n (an escaped backslash, then n) was taken for a line break,
+        so a same-source user block could forge the whole END line; a later AQ== reached the
+        digest across review calls. JSON text is now decoded by the JSON parser."""
+        forged = json.dumps({"note": f"x\\n{self.SPLIT_END}\\n"})  # literal backslash-n, not a newline
+        self.events({"type": "user", "message": {"content": f"key {self.SPLIT_BEGIN}"}},
+                    {"type": "user", "message": {"content": forged}})
+        state = {"transcripts": [self.path], "offsets": {}}
+        guards = {}
+        text1, offsets = review.gather(state, 10**6, guards)
+        self.assertTrue(guards[self.path]["open"])
+        with open(self.path, "a") as fh:
+            fh.write(json.dumps({"type": "user", "message": {"content": "AQ=="}}) + "\n")
+            fh.write(json.dumps({"type": "user", "message": {"content": f"{self.SPLIT_END}\nafter-end"}}) + "\n")
+        state = {"transcripts": [self.path], "offsets": offsets, "key_guard": guards,
+                 "ident": {self.path: review.identity(self.path, offsets[self.path])}}
+        text2 = review.gather(state, 10**6, {})[0]
+        self.assertNotIn("AQ==", text1 + text2)
+        self.assertIn("after-end", text2)
+
+    def test_one_tool_result_cannot_close_another_results_key(self):
+        """Tool result B closed the guard tool result A opened (both were just
+        "tool_result"), and A's later body leaked. The guard keeps the very tool call's id."""
+        b = self.SPLIT_BODY
+        res = lambda cid, c: {"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": cid, "content": c}]}}
+        self.events(res("A1", f"key {self.SPLIT_BEGIN}"), res("B2", self.SPLIT_END),
+                    {"type": "user", "message": {"content": b}}, res("A1", f"{self.SPLIT_END}\nafter-end"))
+        text = review.digest(self.path, 0, 10**6)[0]
+        self.assertNotIn(b, text)
+        self.assertIn("[withheld: private-key] after-end", text)
+
+    def test_an_id_less_tool_block_source_never_repeats_across_runs(self):
+        """An ID-less tool block got tool_result:?1 from a per-process counter, so the next
+        review process's first ID-less result matched a saved guard and closed it."""
+        code = ("import sys; sys.path.insert(0, %r); import review; "
+                "print(review.tool_source('tool_result', None))" % os.path.dirname(os.path.abspath(review.__file__)))
+        runs = {subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                               env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1")).stdout.strip() for _ in range(3)}
+        self.assertEqual(len(runs), 3)
+        for src in runs:
+            self.assertRegex(src, r"^tool_result:\?[0-9a-f]{32}$")
+            self.assertIsNotNone(review.KeyGuard({"open": True, "label": "RSA PRIVATE KEY", "source": src}).source)
+
+    def test_plain_text_escapes_are_never_read_as_line_breaks(self):
+        """Outside JSON nothing is unescaped, not even in the block that opens the key, so a
+        literal \\n there cannot manufacture an END line."""
+        b = self.SPLIT_BODY
+        self.events({"type": "user", "message": {"content": f"k {self.SPLIT_BEGIN}\\n{self.SPLIT_END}\\n {b}"}},
+                    {"type": "user", "message": {"content": f"{self.SPLIT_END}\nafter-end"}})
+        text = review.digest(self.path, 0, 10**6)[0]
+        self.assertNotIn(b, text)
+        self.assertIn("after-end", text)
 
     def test_four_character_fragments_never_show(self):
         """4-character body fragments (AQ== included) survived, across
@@ -371,7 +434,7 @@ class Transcripts(unittest.TestCase):
         self.events(self.prose(0), self.prose(1))
         state = {"transcripts": [self.path], "offsets": {}}
         self.assertIn("m01 ", self.read(state))
-        state["key_guard"] = {self.path: {"open": True, "withheld": 0, "label": "RSA PRIVATE KEY"}}
+        state["key_guard"] = {self.path: {"open": True, "label": "RSA PRIVATE KEY", "source": "user"}}
         return state
 
     def test_a_transcript_recreated_larger_is_read_from_the_start(self):
@@ -430,9 +493,11 @@ class Transcripts(unittest.TestCase):
         self.events({"type": "user", "message": {"content": f"{self.SPLIT_BODY}\n{self.SPLIT_END}\nafter the end."}})
         rsa = "RSA PRIVATE KEY"
         # (saved, body hidden, text after the END shown)
-        for saved, hidden, after in (({"open": True, "label": rsa}, True, True),
-                                     # a 0.3.2 state with "withheld": the count is ignored
-                                     ({"open": True, "withheld": 5, "label": rsa}, True, True),
+        for saved, hidden, after in (({"open": True, "label": rsa, "source": "user"}, True, True),
+                                     # a 0.3.2 state ("withheld", no source): unknown provenance,
+                                     # so nothing but reset-guard closes it
+                                     ({"open": True, "label": rsa}, True, False),
+                                     ({"open": True, "withheld": 5, "label": rsa}, True, False),
                                      ("junk", False, True), ({"open": "yes", "label": rsa}, False, True),
                                      # an unreadable or other label: open until reset-guard, as
                                      # only its own END could close it: everything stays hidden
@@ -760,20 +825,35 @@ class Apply(unittest.TestCase):
         self.assertIn("not a learned change", r.stderr)
         self.assertNotEqual(self.undo("hand-made").returncode, 0)
 
-    def test_reset_guard_clears_open_guards_and_is_on_record(self):
+    def test_reset_guard_clears_one_session_and_is_on_record(self):
         sdir = common.state_dir(self.proj)
+        other = os.path.join(os.path.dirname(self.transcript), "other.jsonl")
+        guard = {"open": True, "label": "RSA PRIVATE KEY", "source": "user"}
         with common.locked_state(sdir) as st:
-            st["key_guard"] = {self.transcript: {"open": True, "label": "RSA PRIVATE KEY", "source": "user"}}
+            st["key_guard"] = {self.transcript: dict(guard), other: dict(guard)}
         cli = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli.py")
         env = dict(os.environ, CLAUDE_PROJECT_DIR=self.proj)
-        status = subprocess.run([sys.executable, cli, "status"], capture_output=True, text=True, env=env)
-        self.assertIn("key guard open in t (RSA PRIVATE KEY)", status.stdout)
-        r = subprocess.run([sys.executable, cli, "reset-guard"], capture_output=True, text=True, env=env)
+        run = lambda *a: subprocess.run([sys.executable, cli, *a], capture_output=True, text=True, env=env)
+        self.assertIn("key guard open in t (RSA PRIVATE KEY)", run("status").stdout)
+        listed = run("reset-guard")  # no session: lists, clears nothing
+        self.assertIn("open: t (RSA PRIVATE KEY)", listed.stdout)
+        self.assertIn("open: other (RSA PRIVATE KEY)", listed.stdout)
+        for bad in (("t", "other"), ("t; rm -rf ~",), ("",)):
+            with self.subTest(bad=bad):
+                self.assertNotEqual(run("reset-guard", *bad).returncode, 0)
+        self.assertEqual(len(common.load_state(sdir)["key_guard"]), 2)
+        self.assertIn("no open key guard for nope", run("reset-guard", "nope").stdout)
+        r = run("reset-guard", "t")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("cleared 1 key guard(s)", r.stdout)
-        self.assertEqual(common.load_state(sdir)["key_guard"], {})
+        self.assertIn("cleared the key guard of t", r.stdout)
+        # one session only: another transcript's guard (maybe a real key) stays
+        self.assertEqual(list(common.load_state(sdir)["key_guard"]), [other])
         with open(os.path.join(sdir, "review.log")) as fh:
-            self.assertIn("key guard reset for t by cli.py reset-guard", fh.read())
+            log = fh.read()
+        self.assertIn("key guard reset for t by cli.py reset-guard", log)
+        self.assertNotIn("for other", log)
+        with common.locked_state(sdir) as st:
+            st["key_guard"] = {}
         status = subprocess.run([sys.executable, cli, "status"], capture_output=True, text=True, env=env)
         self.assertNotIn("key guard open", status.stdout)
 

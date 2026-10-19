@@ -165,13 +165,17 @@ work's subject may leave the organization.
   body too (PEM, encrypted PEM, PGP, JSON-escaped), and one split across messages or reviews.
   A `BEGIN` opens a key wherever it appears. Everything after it is withheld, across messages
   and reviews, until the whole `END` line with the same label (`BEGIN RSA …` closes only at
-  `END RSA …`; a nested or mismatched one is body) from the same kind of block (user,
-  assistant, tool input, tool result: a fetched page can't end a key pasted in a user turn).
-  An `END` is a whole line only: text before or after the marker keeps the key open. A
-  literal `\n` counts as a line break only in a block that opens the key itself, or in JSON.
+  `END RSA …`; a nested or mismatched one is body) from the same place: the user's text, the
+  assistant's, or the very tool call (by its id), so one fetched page can't end a key pasted
+  in a user turn or opened by another tool result. A guard whose source is unknown (saved by
+  0.3.2, or unreadable) closes at no `END`, only by reset. An `END` is a whole line only: text
+  before or after the marker keeps the key open. In JSON (a whole block, or a JSON document
+  inside prose) the JSON parser decides what is a line break: `\n` is one, an escaped
+  backslash then `n` is not, JSON inside JSON included. Nothing outside JSON is unescaped.
   There is no size bound: it fails closed. A stray `BEGIN` (a format note in prose, say) keeps
   the rest of that transcript out of reviews; `status` says so, and
-  `/learned-skills:learned-reset-guard` (`cli.py reset-guard`, logged) clears it. The state is
+  `/learned-skills:learned-reset-guard SESSION` (`cli.py reset-guard SESSION`, logged) clears
+  that one transcript's guard, never another's, without replaying what was held. The state is
   kept in `state.json` (`key_guard`) beside the offset, which is bound to the file it was read
   from (`ident`: dev, inode and a hash of its first 4 KB, so a transcript replaced at the same
   path is read again from the start, guard reset). An opaque password matches no shape and is kept out only by the review's own refusal, as is an over-broad description ("Use

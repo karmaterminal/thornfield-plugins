@@ -21,6 +21,7 @@ import stat
 import subprocess
 import sys
 import time
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
@@ -32,6 +33,52 @@ TEXT_CAP, TOOL_CAP, RESULT_CAP = 3000, 400, 600
 
 def log(msg):
     print(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} {redact(str(msg))}", flush=True)
+
+
+def json_text(text):
+    """The string values of a JSON document, decoded by the JSON parser and joined by line
+    breaks; a value that is itself a JSON document (JSON inside JSON) is decoded the same way.
+    So an escaped line break is one only when JSON says so, escaped backslashes included."""
+    out = []
+
+    def walk(v):
+        if isinstance(v, str):
+            inner = v.strip()
+            if inner[:1] in ("{", "[") and is_json(inner):
+                walk(json.loads(inner))
+            else:
+                out.append(v)
+        elif isinstance(v, dict):
+            for k, x in v.items():
+                out.append(str(k))
+                walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+    walk(json.loads(text))
+    return "\n".join(out)
+
+
+def decode_json(text):
+    """`text` with each JSON document in it (the whole text, or an object or array inside prose,
+    as a pasted service-account file) replaced by json_text(): line breaks are then what JSON
+    says they are, and nothing else in the text is unescaped."""
+    if is_json(text):
+        return json_text(text)
+    out, pos, dec = [], 0, json.JSONDecoder()
+    for m in re.finditer(r"[{\[]", text):
+        if m.start() < pos:
+            continue
+        try:
+            value, end = dec.raw_decode(text, m.start())
+        except ValueError:
+            continue
+        if isinstance(value, (dict, list)):
+            out.append(text[pos:m.start()])
+            out.append(json_text(json.dumps(value)))
+            pos = end
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def is_json(text):
@@ -46,8 +93,8 @@ def is_json(text):
 def redact(text):
     """Credential shapes replaced by their rule name. Applied to everything the plugin writes
     from the review's own words: log lines, summaries, commit messages, notices, events."""
-    if KEY_BEGIN.search(text) and is_json(text):  # a JSON-escaped key's END as its own line
-        text = JSON_EOL.sub("\n", text)
+    if KEY_BEGIN.search(text):  # a JSON-escaped key's END as its own line, by the JSON parser
+        text = decode_json(text)
     for rule, rx in SECRET_RULES:
         text = rx.sub(f"[withheld: {rule}]", text)
     return text
@@ -66,7 +113,6 @@ KEY_BEGIN = re.compile(rf"-----BEGIN ({KEY_LABEL})-----")
 # after JSON-escaped newlines are turned into real ones, a line that is exactly the END marker
 # with the opener's label, give or take spaces, quotes, commas and closing brackets around it.
 # No lookaround edges: "x-----END ...", "-----END ...-----x" and "a -----END ... b" are body.
-JSON_EOL = re.compile(r"\\+[rn]")
 END_EDGE = r"[ \t\r\"',}\]]*"
 
 
@@ -74,7 +120,16 @@ def key_end(label):
     return re.compile(rf"^{END_EDGE}-----END {re.escape(label)}-----{END_EDGE}$", re.M)
 
 
-SOURCES = ("user", "assistant", "tool_use", "tool_result")
+# Where a key was opened: the user's or the assistant's text, or one tool call's input or result,
+# by its id. A tool block without an id gets a random one of its own (?UUID), so no other block,
+# in this review or a later one, can close it (a per-process counter repeated across runs).
+SOURCE_RE = re.compile(r"(?:user|assistant|(?:tool_use|tool_result):[A-Za-z0-9._?-]{1,128})")
+
+
+def tool_source(kind, call_id):
+    if isinstance(call_id, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,120}", call_id):
+        return f"{kind}:{call_id}"
+    return f"{kind}:?{uuid.uuid4().hex}"
 WITHHELD_RUN = re.compile(r"\[withheld: private-key\](?:\s*\[withheld: private-key\])+")
 
 
@@ -92,10 +147,11 @@ class KeyGuard:
         label, source = saved.get("label"), saved.get("source")
         self.open = saved.get("open") is True
         self.label = label if isinstance(label, str) and re.fullmatch(KEY_LABEL, label) else None
-        # Where the key was opened: user, assistant, tool_use or tool_result. Only an END from
-        # the same kind of block closes it, so a tool result (a fetched page, a file) cannot end
-        # a key that was pasted in a user turn. None (0.3.2 state): any source.
-        self.source = source if source in SOURCES else None
+        # Where the key was opened (SOURCE_RE). Only an END from that same place closes it: the
+        # user's text, the assistant's, or the very tool call, so one tool result (a fetched
+        # page) cannot end a key that another result, or a user turn, opened. Unknown
+        # (a 0.3.2 state, or unreadable): nothing closes it but reset-guard.
+        self.source = source if isinstance(source, str) and SOURCE_RE.fullmatch(source) else None
 
     def saved(self):
         return {"open": True, "label": self.label, "source": self.source} if self.open else None
@@ -116,16 +172,16 @@ def shown(s, n, guard=None, source=None):
     s = str(s)
     if guard is None:
         return clip(redact(s), n)
-    # JSON-escaped line breaks become real ones (so a JSON-pasted key's END is a line of its
-    # own) in a block that opens a key itself, or in JSON. A later block of plain text keeps
-    # its literal \n: there it cannot fake an END line for a key opened earlier.
-    if KEY_BEGIN.search(s) or (guard.open and (source == "tool_use" or is_json(s))):
-        s = JSON_EOL.sub("\n", s)
+    # JSON in the block (the whole block, or a JSON document inside prose) is decoded by the
+    # JSON parser, so a JSON-pasted key's END is a line of its own exactly when JSON says so.
+    # Nothing outside JSON is unescaped: a literal \n in plain text cannot fake an END line.
+    if guard.open or KEY_BEGIN.search(s):
+        s = decode_json(s)  # the serialization layer, decoded once by the JSON parser
     out, pos = [], 0
     while pos <= len(s):
         if guard.open:
             m = (key_end(guard.label).search(s, pos)
-                 if guard.label and guard.source in (None, source) else None)
+                 if guard.label and guard.source is not None and guard.source == source else None)
             out.append(guard.inside(s[pos:m.start() if m else len(s)]))
             if not m:
                 break
@@ -148,13 +204,13 @@ def render_blocks(role, content, guard=None):
         if t == "text":
             out.append(f"{role.upper()}: {shown(b.get('text', ''), TEXT_CAP, guard, role)}")
         elif t == "tool_use":
-            out.append(f"TOOL {b.get('name')}: {shown(json.dumps(b.get('input'), ensure_ascii=False), TOOL_CAP, guard, 'tool_use')}")
+            out.append(f"TOOL {b.get('name')}: {shown(json.dumps(b.get('input'), ensure_ascii=False), TOOL_CAP, guard, tool_source('tool_use', b.get('id')))}")
         elif t == "tool_result":
             c = b.get("content")
             if isinstance(c, list):
                 c = " ".join(x.get("text", "") for x in c if isinstance(x, dict))
             tag = "RESULT (error)" if b.get("is_error") else "RESULT"
-            out.append(f"{tag}: {shown(c, RESULT_CAP, guard, 'tool_result')}")
+            out.append(f"{tag}: {shown(c, RESULT_CAP, guard, tool_source('tool_result', b.get('tool_use_id')))}")
     return out
 
 
@@ -774,12 +830,14 @@ def main():
                 "withheld from reviews until the matching END line, or cli.py reset-guard")
 
 
-def reset_guards(state, transcript=None):
-    """Clears the open key guards (all, or one transcript's), logged: the recovery for a BEGIN
-    that never gets its END, a format note in prose for example. The text after it is then
-    reviewed again from the saved offset on. Returns the transcripts cleared."""
+def reset_guards(state, session):
+    """Clears one transcript's open key guard, logged: the recovery for a BEGIN that never gets
+    its END, a format note in prose for example. `session` is the transcript's label as status
+    shows it; no other transcript's guard is touched (a reset must not release an unrelated real
+    key). Text after the guard is reviewed from the saved offset on, so nothing withheld is
+    replayed. Returns the transcripts cleared (none for an unknown label)."""
     guards = state.get("key_guard") if isinstance(state.get("key_guard"), dict) else {}
-    cleared = [t for t in list(guards) if transcript in (None, t)]
+    cleared = [t for t in list(guards) if label(t) == session]
     for t in cleared:
         del guards[t]
         log(f"key guard reset for {label(t)} by cli.py reset-guard")

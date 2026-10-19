@@ -10,14 +10,13 @@ Directly: python3 PLUGIN/scripts/cli.py ARGS.
   undo NAME         restore NAME to before its last learned change (removes it if created),
                     from the review's saved copy if uncommitted, else from git
   review-now        run a review now, in the foreground, of every known transcript
-  reset-guard       clear open private-key guards: after a BEGIN with no END, a transcript's
-                    text is withheld from reviews until its END or this (logged)
+  reset-guard [SESSION]  list open private-key guards, or clear SESSION's (logged): after a
+                    BEGIN with no END, that transcript's text is withheld from reviews until
+                    its END or this. Only the named transcript's guard is cleared.
 
 Run from the project (or set CLAUDE_PROJECT_DIR). Nothing happens until the project has
 .claude/learned-skills.json.
 """
-import contextlib
-import io
 import os
 import re
 import shutil
@@ -137,16 +136,24 @@ def main():
                 print("".join(fh.readlines()[-n:]), end="")
     elif args[0] == "undo" and len(args) == 2:
         undo(proj, args[1])
-    elif args[0] == "reset-guard" and len(args) == 1:
+    elif args[0] == "reset-guard" and len(args) in (1, 2):
         need_config(proj)
         sdir = common.state_dir(proj)
-        out = io.StringIO()  # the reset's log lines, here and in review.log, so it is on record
-        with common.locked_state(sdir) as st, contextlib.redirect_stdout(out):
-            cleared = review.reset_guards(st)
-        with open(os.path.join(sdir, "review.log"), "a") as log:
-            log.write(out.getvalue())
-        sys.stdout.write(out.getvalue())
-        print(f"cleared {len(cleared)} key guard(s)" + "".join(f"\n  {review.label(t)}" for t in cleared))
+        if len(args) == 1:
+            guards = common.load_state(sdir).get("key_guard") or {}
+            print("\n".join(f"open: {review.label(t)} ({(g or {}).get('label')})" for t, g in guards.items())
+                  or "no open key guard")
+            return
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", args[1]):
+            sys.exit("learned-skills: reset-guard takes one session id, as status shows it")
+        with common.locked_state(sdir) as st:
+            cleared = review.reset_guards(st, args[1])
+        msg = f"cleared the key guard of {args[1]}" if cleared else f"no open key guard for {args[1]}"
+        if cleared:  # in the review log too, where `log` shows it
+            with open(os.path.join(sdir, "review.log"), "a") as fh:
+                fh.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} key guard reset for {args[1]} "
+                         "by cli.py reset-guard; its text is reviewed again from the saved offset\n")
+        print(msg)
     elif args[0] == "review-now":
         need_config(proj)
         if not common.load_state(common.state_dir(proj))["transcripts"]:
