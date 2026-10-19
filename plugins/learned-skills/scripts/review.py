@@ -12,6 +12,7 @@ below are copied into the project; every other change is dropped.
 """
 import fcntl
 import filecmp
+import hashlib
 import json
 import os
 import re
@@ -50,10 +51,14 @@ def clip(s, n):
 # BLOCK"). A key closes only at the END line with the same label: any other END is body.
 KEY_LABEL = r"[A-Z ]*PRIVATE KEY(?: BLOCK)?"
 KEY_BEGIN = re.compile(rf"-----BEGIN ({KEY_LABEL})-----")
+# An END marker counts only as a complete line: then end of text, a newline, a literal \n or
+# \r (a JSON-escaped key, escaped once or more), a quote (escaped or not), or } or ].
+# "-----END RSA PRIVATE KEY-----NOT_AN_END_LINE" is body.
+END_LINE = r"(?=[ \t]*(?:\Z|\r?\n|\\+[rn]|\\*[\"']|[}\]]))"
 
 
 def key_end(label):
-    return re.compile(rf"-----END {re.escape(label)}-----")
+    return re.compile(rf"-----END {re.escape(label)}-----{END_LINE}")
 
 
 KEY_GUARD_MAX = 32 << 10  # withheld text before a guard gives up; a 16384-bit RSA PEM is ~12 KB
@@ -260,14 +265,12 @@ def restore(name, before, skills_dir):
 
 # Credential shapes refused in any learned file. Only the rule name is logged.
 SECRET_RULES = [
-    # The block through its END line, so redact() withholds the key body, not just the header:
-    # PEM (LF or CRLF), encrypted PEM headers (Proc-Type, DEK-Info), PGP armor, and a body whose
-    # newlines are JSON-escaped once (a pasted service-account file) or more (one in a tool input).
-    # BEGIN X pairs with END X only (a backreference); any other key marker inside is body.
-    ("private-key", re.compile(r"-----BEGIN (?P<label>[A-Z ]*PRIVATE KEY(?: BLOCK)?)-----"
-                               r"(?:(?!-----END (?P=label)-----)-----(?:BEGIN|END) [A-Z ]*PRIVATE KEY(?: BLOCK)?-----"
-                               r"|[A-Za-z][A-Za-z-]{0,31}: [!-~]+|\\+[rn]|[A-Za-z0-9+/=\s])*"
-                               r"(?:-----END (?P=label)-----)?")),
+    # BEGIN X through the complete END X line (a backreference; see END_LINE), or to the end
+    # of the text: everything between, nested, mismatched or decoy END lines included, is
+    # withheld, so PEM, encrypted PEM, PGP armor and JSON-escaped bodies need no shape of
+    # their own. In the digest a block's BEGIN is already withheld by shown() first.
+    ("private-key", re.compile(rf"-----BEGIN (?P<label>{KEY_LABEL})-----[\s\S]*?"
+                               rf"(?:-----END (?P=label)-----{END_LINE}|\Z)")),
     ("github-token", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})")),
     ("anthropic/openai-key", re.compile(r"\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}")),
     ("slack-token", re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}")),
@@ -507,20 +510,48 @@ def label(transcript):
     return os.path.splitext(os.path.basename(transcript))[0]
 
 
-def gather(state, cap, guards=None):
+IDENT_PREFIX = 4096
+
+
+def identity(path, offset):
+    """What a saved offset belongs to: the file (dev, ino) and a hash of its first
+    min(offset, 4096) bytes, which an append never changes."""
+    n = min(offset, IDENT_PREFIX)
+    with open(path, "rb") as fh:
+        st = os.fstat(fh.fileno())
+        head = fh.read(n)
+    return {"dev": st.st_dev, "ino": st.st_ino, "n": n, "sha": hashlib.sha256(head).hexdigest()}
+
+
+def replaced(path, offset, saved):
+    """True when the transcript at `path` is not the one `offset` was read from: it shrank
+    below the offset, or it is another file, or its start was rewritten. A saved state without
+    an identity (from an earlier version) is adopted: only the size check applies to it."""
+    if offset > os.path.getsize(path):
+        return True
+    if not (isinstance(saved, dict) and type(saved.get("n")) is int and saved["n"] == min(offset, IDENT_PREFIX)):
+        return False
+    return identity(path, offset) != {k: saved.get(k) for k in ("dev", "ino", "n", "sha")}
+
+
+def gather(state, cap, guards=None, idents=None):
     """Digest of every known transcript past its offset, oldest first. Returns (text, offsets);
-    fills `guards` with each transcript's KeyGuard state, to save with its offset."""
+    fills `guards` with each transcript's KeyGuard state and `idents` with its identity, to
+    save with its offset."""
     parts, offsets = [], {}
     saved = state.get("key_guard") if isinstance(state.get("key_guard"), dict) else {}
+    known_ids = state.get("ident") if isinstance(state.get("ident"), dict) else {}
     known = [t for t in state["transcripts"] if os.path.isfile(t)]
     for t in sorted(known, key=os.path.getmtime):
         off, guard = state["offsets"].get(t, 0), KeyGuard(saved.get(t))
-        if off > os.path.getsize(t):
+        if replaced(t, off, known_ids.get(t)):
             off, guard = 0, KeyGuard()  # the transcript was replaced: its guard goes with it
         text, end = digest(t, off, cap, guard)
         offsets[t] = end
         if guards is not None:
             guards[t] = guard.saved()
+        if idents is not None:
+            idents[t] = identity(t, end)
         if text:
             parts.append(f"## session {label(t)}\n{text}")
     text = "\n\n".join(parts)
@@ -548,8 +579,8 @@ def main():
         log(f"review refused: engine must be claude, not {cfg['engine']!r}; nothing applied")
         return
     state = common.load_state(sdir)
-    new_guards = {}
-    text, new_offsets = gather(state, cfg["max_digest_bytes"], new_guards)
+    new_guards, new_idents = {}, {}
+    text, new_offsets = gather(state, cfg["max_digest_bytes"], new_guards, new_idents)
     # Each block was redacted before any clip or cut (shown); this pass catches a shape that
     # only the joined text forms.
     text = redact(text)
@@ -705,6 +736,9 @@ def main():
         log("review end: nothing learned")
     with common.locked_state(sdir) as state:
         state["offsets"].update(new_offsets)
+        if not isinstance(state.get("ident"), dict):
+            state["ident"] = {}
+        state["ident"].update(new_idents)  # the identity each new offset was read from
         if not isinstance(state.get("key_guard"), dict):
             state["key_guard"] = {}
         for t, g in new_guards.items():  # with the offset it belongs to, in the same update

@@ -91,9 +91,9 @@ class Transcripts(unittest.TestCase):
             """The key, then filler: whole 2000-char turns short of the cap, and one of x chars."""
             fill = "".join(user("f" * 2000) for _ in range(max(0, cap // 2008 - 1))) + user("f" * x)
             if via == "digest":
-                write(self.path, user(f"the key: {key} after-key") + fill)
+                write(self.path, user(f"the key: {key}\nafter-key") + fill)
                 return lambda c: review.digest(self.path, 0, c)[0]
-            write(older, user(f"the key: {key} after-key"))
+            write(older, user(f"the key: {key}\nafter-key"))
             os.utime(older, (1, 1))
             write(self.path, fill)
             return lambda c: review.gather({"transcripts": [older, self.path], "offsets": {}}, c)[0]
@@ -130,7 +130,7 @@ class Transcripts(unittest.TestCase):
     def test_a_key_split_across_two_messages_never_leaves_its_body(self):
         """BEGIN in one block and the body and END in the next left the body visible."""
         path = self.split_events(f"here is the key {self.SPLIT_BEGIN}",
-                                 f"{self.SPLIT_BODY}\n{self.SPLIT_BODY}\n{self.SPLIT_END} after-end",
+                                 f"{self.SPLIT_BODY}\n{self.SPLIT_BODY}\n{self.SPLIT_END}\nafter-end",
                                  "the next message survives")
         text = review.digest(path, 0, 200_000)[0]
         self.assertNotIn(self.SPLIT_BODY, text)
@@ -156,14 +156,14 @@ class Transcripts(unittest.TestCase):
         m, b = self.marker, self.SPLIT_BODY
         return {
             "wrong END in a later block": [f"key {m('BEGIN', 'RSA')}", m("END", "PGP"),
-                                           b, f"{m('END', 'RSA')} after-end"],
+                                           b, f"{m('END', 'RSA')}\nafter-end"],
             "wrong END in the opening block": [f"key {m('BEGIN', 'RSA')} {b} {m('END', 'PGP')}",
-                                               b, f"{m('END', 'RSA')} after-end"],
-            "all in one block": [f"key {m('BEGIN', 'RSA')} {b} {m('END', 'PGP')} {b} {m('END', 'RSA')} after-end"],
+                                               b, f"{m('END', 'RSA')}\nafter-end"],
+            "all in one block": [f"key {m('BEGIN', 'RSA')} {b} {m('END', 'PGP')} {b} {m('END', 'RSA')}\nafter-end"],
             "nested, across blocks": [f"key {m('BEGIN', 'RSA')}", f"{m('BEGIN', 'PGP')} {b}",
-                                      f"{m('END', 'PGP')} {b}", f"{m('END', 'RSA')} after-end"],
+                                      f"{m('END', 'PGP')} {b}", f"{m('END', 'RSA')}\nafter-end"],
             "nested, one block": [f"key {m('BEGIN', 'RSA')} {m('BEGIN', 'PGP')} {b} {m('END', 'PGP')} "
-                                  f"{b} {m('END', 'RSA')} after-end"],
+                                  f"{b} {m('END', 'RSA')}\nafter-end"],
         }
 
     def test_a_mismatched_or_nested_end_never_exposes_the_body(self):
@@ -173,13 +173,41 @@ class Transcripts(unittest.TestCase):
                 self.assertNotIn(self.SPLIT_BODY, text)
                 self.assertIn("[withheld: private-key] after-end", text)
 
+    DECOYS = ("NOT_AN_END_LINE", "x", ", more", " prose")
+
+    def test_a_malformed_end_with_the_right_label_closes_nothing(self):
+        """An END marker anywhere closed the key, so a decoy such as END ...-----NOT_AN_END_LINE
+        exposed the body after it. Only a complete END line closes."""
+        m, b = self.marker, self.SPLIT_BODY
+        for decoy in self.DECOYS:
+            fake = m("END", "RSA") + decoy
+            for where, texts in (
+                    ("same block", [f"key {m('BEGIN', 'RSA')}\n{fake}\n{b}\n{m('END', 'RSA')}\nafter-end"]),
+                    ("later block", [f"key {m('BEGIN', 'RSA')}", f"{fake}\n{b}", f"{m('END', 'RSA')}\nafter-end"])):
+                with self.subTest(decoy=decoy, where=where):
+                    text = review.digest(self.split_events(*texts), 0, 10**6)[0]
+                    self.assertNotIn(b, text)
+                    self.assertIn("[withheld: private-key] after-end", text)
+            with self.subTest(decoy=decoy, where="redact() alone"):
+                text = review.redact(f"key {m('BEGIN', 'RSA')}\n{fake}\n{b}\n{m('END', 'RSA')}\nafter-end")
+                self.assertEqual(text, "key [withheld: private-key]\nafter-end")
+
+    def test_a_json_escaped_end_line_still_closes(self):
+        """A JSON-escaped key has no real newline: its END is followed by a literal \\n or a quote."""
+        m, b = self.marker, self.SPLIT_BODY
+        for tail in ("\\n", "\\\\n", '"', '\\"', "\\r\\n"):
+            with self.subTest(tail=tail):
+                text = review.redact(f'{{"k": "{m("BEGIN", "RSA")}\\n{b}\\n{m("END", "RSA")}{tail}", "after": 1}}')
+                self.assertNotIn(b, text)
+                self.assertIn('"after": 1', text)
+
     def test_the_single_block_rule_pairs_begin_with_its_own_end(self):
         """redact() alone (logs, summaries, check_skill's scan): BEGIN X runs to END X."""
         for name in ("all in one block", "nested, one block"):
             with self.subTest(case=name):
                 text = review.redact(self.mismatched()[name][0])
                 self.assertNotIn(self.SPLIT_BODY, text)
-                self.assertEqual(text, "key [withheld: private-key] after-end")
+                self.assertEqual(text, "key [withheld: private-key]\nafter-end")
 
     def test_a_mismatched_end_across_two_reviews_never_exposes_the_body(self):
         """The label is saved with the guard: review 2 still closes only on review 1's label."""
@@ -229,6 +257,65 @@ class Transcripts(unittest.TestCase):
         self.assertIn("m07 ", text)
         self.assertEqual(guards, {self.path: None})
 
+    def read(self, state):
+        """One review's gather, then its saves, as main() keeps them."""
+        guards, idents = {}, {}
+        text, offsets = review.gather(state, 10**6, guards, idents)
+        state["offsets"].update(offsets)
+        state.setdefault("ident", {}).update(idents)
+        state["key_guard"] = {t: g for t, g in guards.items() if g}
+        return text
+
+    def first_read(self):
+        """m00 and m01 read, with the guard saved open: a replaced file must reset both."""
+        self.events(self.prose(0), self.prose(1))
+        state = {"transcripts": [self.path], "offsets": {}}
+        self.assertIn("m01 ", self.read(state))
+        state["key_guard"] = {self.path: {"open": True, "withheld": 0, "label": "RSA PRIVATE KEY"}}
+        return state
+
+    def test_a_transcript_recreated_larger_is_read_from_the_start(self):
+        """Only a shrink was seen as a replacement. Here the old file is kept alive (renamed),
+        so the new one is another inode, with the same first bytes and more after."""
+        state = self.first_read()
+        os.rename(self.path, self.path + ".old")
+        self.events(self.prose(0), self.prose(1), self.prose(2), self.prose(3))
+        text = self.read(state)
+        self.assertIn("m00 ", text)  # from offset 0, with a fresh guard
+        self.assertIn("m03 ", text)
+        self.assertEqual(state["key_guard"], {})
+
+    def test_a_transcript_rewritten_in_place_at_equal_size_is_read_from_the_start(self):
+        state = self.first_read()
+        size, ino = os.path.getsize(self.path), os.stat(self.path).st_ino
+        with open(self.path, "r+b") as fh:  # same inode, same size, a different first turn
+            fh.write(json.dumps(self.prose(7)).encode())
+        self.assertEqual((os.path.getsize(self.path), os.stat(self.path).st_ino), (size, ino))
+        text = self.read(state)
+        self.assertIn("m07 ", text)
+        self.assertEqual(state["key_guard"], {})
+
+    def test_an_append_keeps_the_offset_and_the_guard(self):
+        state = self.first_read()
+        with open(self.path, "a") as fh:
+            fh.write(json.dumps({"type": "user", "message": {"content": f"{self.SPLIT_BODY}\n{self.SPLIT_END}\nafter"}}) + "\n")
+        text = self.read(state)
+        self.assertNotIn("m00 ", text)  # only the new turn
+        self.assertNotIn(self.SPLIT_BODY, text)  # under the guard saved open
+        self.assertIn("after", text)
+
+    def test_state_without_an_identity_is_adopted(self):
+        """State saved before identities existed keeps its offset, and gains an identity."""
+        self.events(self.prose(0))
+        size = os.path.getsize(self.path)
+        with open(self.path, "a") as fh:
+            fh.write(json.dumps(self.prose(1)) + "\n")
+        state = {"transcripts": [self.path], "offsets": {self.path: size}}
+        text = self.read(state)
+        self.assertNotIn("m00 ", text)
+        self.assertIn("m01 ", text)
+        self.assertEqual(state["ident"][self.path]["n"], min(os.path.getsize(self.path), 4096))
+
     def test_a_replaced_transcript_resets_its_guard(self):
         self.events(self.prose(0))
         state = {"transcripts": [self.path], "offsets": {self.path: 10**6},  # past its size
@@ -239,7 +326,7 @@ class Transcripts(unittest.TestCase):
         self.assertEqual(guards, {self.path: None})
 
     def test_a_saved_guard_withholds_the_body_and_garbage_state_opens_nothing(self):
-        self.events({"type": "user", "message": {"content": f"{self.SPLIT_BODY}\n{self.SPLIT_END} after"}})
+        self.events({"type": "user", "message": {"content": f"{self.SPLIT_BODY}\n{self.SPLIT_END}\nafter"}})
         rsa = "RSA PRIVATE KEY"
         # (saved, body hidden, text after the END shown)
         for saved, hidden, after in (({"open": True, "withheld": 5, "label": rsa}, True, True),
@@ -732,9 +819,11 @@ class Apply(unittest.TestCase):
         self.assertEqual(st["key_guard"], {self.transcript: {"open": True, "withheld": 0,
                                                              "label": "RSA PRIVATE KEY"}})
         self.assertEqual(st["offsets"], {self.transcript: os.path.getsize(self.transcript)})
+        self.assertEqual(st["ident"], {self.transcript: review.identity(self.transcript,
+                                                                      os.path.getsize(self.transcript))})
         with open(self.transcript, "a") as fh:
             fh.write(json.dumps({"type": "user", "message": {"content":
-                                 f"{body}\n{Transcripts.SPLIT_END} after-end"}}) + "\n")
+                                 f"{body}\n{Transcripts.SPLIT_END}\nafter-end"}}) + "\n")
             for i in range(20):
                 fh.write(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
                     {"type": "text", "text": f"later {i}: " + "worked it out " * 20}]}}) + "\n")

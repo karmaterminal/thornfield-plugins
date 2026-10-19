@@ -164,8 +164,12 @@ work's subject may leave the organization.
   so a cut can't strip the header a rule needs and leave the body. That covers a private key's
   body too (PEM, encrypted PEM, PGP, JSON-escaped), and one split across messages or reviews.
   After a `BEGIN` line with no `END`, later blocks are withheld whole up to the `END` with the
-  same label (`BEGIN RSA …` closes only at `END RSA …`; a nested or mismatched one is body). That
-  state is kept in `state.json` (`key_guard`) beside the offset, and gives up after 32 KB of
+  same label (`BEGIN RSA …` closes only at `END RSA …`; a nested or mismatched one is body),
+  and only at a complete `END` line: the marker followed by a newline, a literal `\n`, a quote
+  or the end of the text, never by more text on the same line. That
+  state is kept in `state.json` (`key_guard`) beside the offset, which is bound to the file it
+  was read from (`ident`: dev, inode and a hash of its first 4 KB, so a transcript replaced at
+  the same path is read again from the start, guard reset). The guard gives up after 32 KB of
   withheld text, logging `key guard closed after 32 KB with no END`, so a stray `BEGIN` costs
   the review 32 KB, not the rest of the transcript. An opaque password matches no shape and is kept out only by the review's own refusal, as is an over-broad description ("Use
   for every task") or a body that pipes a download to a shell; `undo` is the recovery. The state
