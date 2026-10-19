@@ -25,7 +25,7 @@ build (0.3.2):
 - Each digest block is redacted before any clip or cut to the digest's tail, so a cut can't
   strip a private key's header and leave its body. A key split across messages or reviews is
   withheld too: after a `BEGIN` line with no `END`, later blocks are withheld whole up to the
-  `END`. That state is saved per transcript beside its offset, and gives up after 32 KB of
+  `END` with the same label (a nested or mismatched `END` is body). That state is saved per transcript beside its offset, and gives up after 32 KB of
   withheld text, so a stray `BEGIN` can't blind a transcript for good. The reviewer's stdout, stderr and summaries are redacted before
   they are clipped.
 - **Claude engine only.** The optional Copilot CLI engine (records only) is removed, with its

@@ -101,7 +101,8 @@ class Transcripts(unittest.TestCase):
         for cap in (500, 200_000):
             for via in ("digest", "gather"):
                 with self.subTest(cap=cap, via=via):
-                    with mock.patch.object(review, "redact", lambda t: t):  # the layout only
+                    plain = review.clip
+                    with mock.patch.object(review, "shown", lambda t, n, guard=None: plain(t, n)):  # layout only
                         full = build(via, cap, 1)(10**9)
                         # The filler length that puts the cut on a chunk well inside the body.
                         x, chunk = next((1 + cap - (len(full) - full.index(f"K{i:03d}")), i)
@@ -145,6 +146,61 @@ class Transcripts(unittest.TestCase):
         self.assertNotIn("prose", text)
         self.assertEqual(text.count("[withheld: private-key]"), 3)
 
+    @staticmethod
+    def marker(kind, label):  # built here, so this file holds no key header itself
+        return f"-----{kind} {label} {'PRIVATE'} KEY{' BLOCK' if label == 'PGP' else ''}-----"
+
+    def mismatched(self):
+        """(name, messages) where only the END with the opener's label may close the key: any
+        END closed it, in a later block or in the opening block itself."""
+        m, b = self.marker, self.SPLIT_BODY
+        return {
+            "wrong END in a later block": [f"key {m('BEGIN', 'RSA')}", m("END", "PGP"),
+                                           b, f"{m('END', 'RSA')} after-end"],
+            "wrong END in the opening block": [f"key {m('BEGIN', 'RSA')} {b} {m('END', 'PGP')}",
+                                               b, f"{m('END', 'RSA')} after-end"],
+            "all in one block": [f"key {m('BEGIN', 'RSA')} {b} {m('END', 'PGP')} {b} {m('END', 'RSA')} after-end"],
+            "nested, across blocks": [f"key {m('BEGIN', 'RSA')}", f"{m('BEGIN', 'PGP')} {b}",
+                                      f"{m('END', 'PGP')} {b}", f"{m('END', 'RSA')} after-end"],
+            "nested, one block": [f"key {m('BEGIN', 'RSA')} {m('BEGIN', 'PGP')} {b} {m('END', 'PGP')} "
+                                  f"{b} {m('END', 'RSA')} after-end"],
+        }
+
+    def test_a_mismatched_or_nested_end_never_exposes_the_body(self):
+        for name, texts in self.mismatched().items():
+            with self.subTest(case=name):
+                text = review.digest(self.split_events(*texts), 0, 10**6)[0]
+                self.assertNotIn(self.SPLIT_BODY, text)
+                self.assertIn("[withheld: private-key] after-end", text)
+
+    def test_the_single_block_rule_pairs_begin_with_its_own_end(self):
+        """redact() alone (logs, summaries, check_skill's scan): BEGIN X runs to END X."""
+        for name in ("all in one block", "nested, one block"):
+            with self.subTest(case=name):
+                text = review.redact(self.mismatched()[name][0])
+                self.assertNotIn(self.SPLIT_BODY, text)
+                self.assertEqual(text, "key [withheld: private-key] after-end")
+
+    def test_a_mismatched_end_across_two_reviews_never_exposes_the_body(self):
+        """The label is saved with the guard: review 2 still closes only on review 1's label."""
+        for name in ("wrong END in a later block", "wrong END in the opening block"):
+            with self.subTest(case=name):
+                texts = self.mismatched()[name]
+                self.events({"type": "user", "message": {"content": texts[0]}})
+                state = {"transcripts": [self.path], "offsets": {}, "key_guard": {}}
+                guards = {}
+                first, offsets = review.gather(state, 10**6, guards)
+                self.assertEqual(guards[self.path]["label"], "RSA PRIVATE KEY")
+                with open(self.path, "a") as fh:
+                    for t in texts[1:]:
+                        fh.write(json.dumps({"type": "user", "message": {"content": t}}) + "\n")
+                state = {"transcripts": [self.path], "offsets": offsets,
+                         "key_guard": json.loads(json.dumps(guards))}  # as state.json keeps it
+                second = review.gather(state, 10**6, {})[0]
+                for text in (first, second):
+                    self.assertNotIn(self.SPLIT_BODY, text)
+                self.assertIn("[withheld: private-key] after-end", second)
+
     def prose(self, i):
         """One 2000-byte user turn, marked m00, m01, ..."""
         return {"type": "user", "message": {"content": f"m{i:02d} " + "w" * 1996}}
@@ -184,13 +240,20 @@ class Transcripts(unittest.TestCase):
 
     def test_a_saved_guard_withholds_the_body_and_garbage_state_opens_nothing(self):
         self.events({"type": "user", "message": {"content": f"{self.SPLIT_BODY}\n{self.SPLIT_END} after"}})
-        for saved, hidden in (({"open": True, "withheld": 5}, True), ("junk", False),
-                              ({"open": "yes", "withheld": 5}, False), ({"open": True, "withheld": -1}, True)):
+        rsa = "RSA PRIVATE KEY"
+        # (saved, body hidden, text after the END shown)
+        for saved, hidden, after in (({"open": True, "withheld": 5, "label": rsa}, True, True),
+                                     ({"open": True, "withheld": -1, "label": rsa}, True, True),
+                                     ("junk", False, True), ({"open": "yes", "label": rsa}, False, True),
+                                     # an unreadable label: open until the bound, never closed early
+                                     ({"open": True, "withheld": 5}, True, False),
+                                     ({"open": True, "withheld": 5, "label": "x]-----"}, True, False),
+                                     ({"open": True, "withheld": 5, "label": "PGP PRIVATE KEY BLOCK"}, True, False)):
             with self.subTest(saved=saved):
                 state = {"transcripts": [self.path], "offsets": {}, "key_guard": {self.path: saved}}
                 text = review.gather(state, 10**6, {})[0]
                 self.assertEqual(self.SPLIT_BODY not in text, hidden)
-                self.assertIn("after", text)
+                self.assertEqual("after" in text, after)
 
     def test_session_labels(self):
         paths = [f"{self.tmp.name}/{name}.jsonl" for name in ("SESSION_A", "SESSION_B")]
@@ -666,7 +729,8 @@ class Apply(unittest.TestCase):
             fh.write(json.dumps({"type": "user", "message": {"content": f"key: {Transcripts.SPLIT_BEGIN}"}}) + "\n")
         self.run_review(lambda work: None)
         st = common.load_state(common.state_dir(self.proj))
-        self.assertEqual(st["key_guard"], {self.transcript: {"open": True, "withheld": 0}})
+        self.assertEqual(st["key_guard"], {self.transcript: {"open": True, "withheld": 0,
+                                                             "label": "RSA PRIVATE KEY"}})
         self.assertEqual(st["offsets"], {self.transcript: os.path.getsize(self.transcript)})
         with open(self.transcript, "a") as fh:
             fh.write(json.dumps({"type": "user", "message": {"content":

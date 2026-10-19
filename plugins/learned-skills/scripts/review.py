@@ -46,50 +46,69 @@ def clip(s, n):
     return s if len(s) <= n else s[:n] + f" …[{len(s) - n} more chars]"
 
 
-KEY_BEGIN = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----")
-KEY_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----")
+# The label is everything between BEGIN and the dashes ("RSA PRIVATE KEY", "PGP PRIVATE KEY
+# BLOCK"). A key closes only at the END line with the same label: any other END is body.
+KEY_LABEL = r"[A-Z ]*PRIVATE KEY(?: BLOCK)?"
+KEY_BEGIN = re.compile(rf"-----BEGIN ({KEY_LABEL})-----")
+
+
+def key_end(label):
+    return re.compile(rf"-----END {re.escape(label)}-----")
 
 
 KEY_GUARD_MAX = 32 << 10  # withheld text before a guard gives up; a 16384-bit RSA PEM is ~12 KB
 
 
 class KeyGuard:
-    """Across the blocks of a transcript: open while a private-key (or PGP) block has begun and
-    its END has not come, so a key split over two messages never leaves its body visible. Saved
-    with the transcript's offset (state.json `key_guard`), so a body read by the next review is
-    withheld too. Bounded: it closes after KEY_GUARD_MAX of withheld text, so a stray BEGIN in
-    prose cannot blind a transcript for good."""
+    """Across the blocks of a transcript: open, with the opening BEGIN's label, until the END
+    line with that same label, so a key split over two messages never leaves its body visible
+    and a mismatched END closes nothing. Saved with the transcript's offset (state.json
+    `key_guard`), so a body read by the next review is withheld too. Bounded: it closes after
+    KEY_GUARD_MAX of withheld text, so a stray BEGIN in prose cannot blind a transcript for good.
+    A saved guard with an unreadable label stays open until that bound."""
 
     def __init__(self, saved=None):
         saved = saved if isinstance(saved, dict) else {}
-        w = saved.get("withheld")
+        w, label = saved.get("withheld"), saved.get("label")
         self.open = saved.get("open") is True
         self.withheld = w if type(w) is int and 0 <= w < KEY_GUARD_MAX else 0
+        self.label = label if isinstance(label, str) and re.fullmatch(KEY_LABEL, label) else None
 
     def saved(self):
-        return {"open": True, "withheld": self.withheld} if self.open else None
+        return {"open": True, "withheld": self.withheld, "label": self.label} if self.open else None
+
+    def withhold(self, text):
+        self.withheld += len(text.encode())
+        if self.withheld >= KEY_GUARD_MAX:
+            self.open, self.withheld, self.label = False, 0, None
+            log("key guard closed after 32 KB with no END")
 
 
 def shown(s, n, guard=None):
     """One rendered block for the digest: redacted whole, then clipped. A rule such as
     private-key needs its header, which a clip, or a later cut to the digest's tail, can drop.
-    With a guard, a block inside an open key is withheld whole up to the END line, and one
-    that opens a key without closing it opens the guard."""
-    s, head = str(s), ""
-    if guard is not None and guard.open:
-        m = KEY_END.search(s)
+    With a guard, the block is walked in order: text outside a key is redacted, and everything
+    from a BEGIN to the END with its label (in this block or a later one) is withheld whole,
+    nested or mismatched BEGIN and END lines included."""
+    s = str(s)
+    if guard is None:
+        return clip(redact(s), n)
+    out, pos = [], 0
+    while pos <= len(s):
+        if guard.open:
+            m = key_end(guard.label).search(s, pos) if guard.label else None
+            out.append("[withheld: private-key]")
+            if not m:
+                guard.withhold(s[pos:])
+                break
+            guard.open, guard.withheld, guard.label, pos = False, 0, None, m.end()
+            continue
+        m = KEY_BEGIN.search(s, pos)
+        out.append(redact(s[pos:m.start() if m else len(s)]))
         if not m:
-            guard.withheld += len(s.encode())
-            if guard.withheld >= KEY_GUARD_MAX:
-                guard.open, guard.withheld = False, 0
-                log("key guard closed after 32 KB with no END")
-            return "[withheld: private-key]"
-        guard.open, guard.withheld, head, s = False, 0, "[withheld: private-key] ", s[m.end():]
-    if guard is not None:
-        begins = [m.end() for m in KEY_BEGIN.finditer(s)]
-        if bool(begins) and not KEY_END.search(s, begins[-1]):
-            guard.open, guard.withheld = True, 0
-    return clip(head + redact(s), n)
+            break
+        guard.open, guard.withheld, guard.label, pos = True, 0, m.group(1), m.end()
+    return clip(" ".join(out), n)
 
 
 def render_blocks(role, content, guard=None):
@@ -244,9 +263,11 @@ SECRET_RULES = [
     # The block through its END line, so redact() withholds the key body, not just the header:
     # PEM (LF or CRLF), encrypted PEM headers (Proc-Type, DEK-Info), PGP armor, and a body whose
     # newlines are JSON-escaped once (a pasted service-account file) or more (one in a tool input).
-    ("private-key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----"
-                               r"(?:[A-Za-z][A-Za-z-]{0,31}: [!-~]+|\\+[rn]|[A-Za-z0-9+/=\s])*"
-                               r"(?:-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----)?")),
+    # BEGIN X pairs with END X only (a backreference); any other key marker inside is body.
+    ("private-key", re.compile(r"-----BEGIN (?P<label>[A-Z ]*PRIVATE KEY(?: BLOCK)?)-----"
+                               r"(?:(?!-----END (?P=label)-----)-----(?:BEGIN|END) [A-Z ]*PRIVATE KEY(?: BLOCK)?-----"
+                               r"|[A-Za-z][A-Za-z-]{0,31}: [!-~]+|\\+[rn]|[A-Za-z0-9+/=\s])*"
+                               r"(?:-----END (?P=label)-----)?")),
     ("github-token", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})")),
     ("anthropic/openai-key", re.compile(r"\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}")),
     ("slack-token", re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}")),

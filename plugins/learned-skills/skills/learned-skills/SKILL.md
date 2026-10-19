@@ -163,7 +163,8 @@ work's subject may leave the organization.
   each rendered block passes the credential scan before any clip or cut to the digest's tail,
   so a cut can't strip the header a rule needs and leave the body. That covers a private key's
   body too (PEM, encrypted PEM, PGP, JSON-escaped), and one split across messages or reviews.
-  After a `BEGIN` line with no `END`, later blocks are withheld whole up to the `END`. That
+  After a `BEGIN` line with no `END`, later blocks are withheld whole up to the `END` with the
+  same label (`BEGIN RSA …` closes only at `END RSA …`; a nested or mismatched one is body). That
   state is kept in `state.json` (`key_guard`) beside the offset, and gives up after 32 KB of
   withheld text, logging `key guard closed after 32 KB with no END`, so a stray `BEGIN` costs
   the review 32 KB, not the rest of the transcript. An opaque password matches no shape and is kept out only by the review's own refusal, as is an over-broad description ("Use
