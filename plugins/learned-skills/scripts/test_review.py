@@ -374,6 +374,10 @@ class Transcripts(unittest.TestCase):
         for name, enc in shapes.items():
             self.assertEqual(json.loads(enc)["private_key"], key, name)
             contents += [enc, f"pasted: {enc} thanks"]
+            # a top-level JSON string, alone and inside prose
+            lit = enc[len('{"private_key": '):-1]
+            self.assertEqual(json.loads(lit), key, name)
+            contents += [lit, f"the key was {lit} ok"]
         for content in contents:
             with self.subTest(content=content[:20]):
                 self.events({"type": "user", "message": {"content": content}})
@@ -381,6 +385,46 @@ class Transcripts(unittest.TestCase):
                 self.assertNotIn(b, text)
                 self.assertNotIn(b, review.redact(text))
                 self.assertNotIn(b, review.redact(content))
+
+    def test_a_block_too_costly_to_decode_fails_closed(self):
+        """Past DECODE_TRIES candidate JSON starts, a block is not parsed: its \\u escapes alone
+        are read, and if a marker or rule shows there the whole block is withheld, the guard
+        tracking what it held. A plain pathological block is shown as it is, quickly."""
+        b = self.SPLIT_BODY
+        noise = '{"a": [' * (review.DECODE_TRIES + 50)
+        lit = json.dumps(f"{self.SPLIT_BEGIN}\n{b}").replace("-", "\\u002d")
+        g = review.KeyGuard()
+        t0 = time.time()
+        out = review.shown(noise + lit, 10**6, g, "user")
+        self.assertLess(time.time() - t0, 5)
+        self.assertNotIn(b, out)
+        self.assertTrue(g.open)
+        self.assertNotIn(b, review.redact(noise + lit))
+        plain = review.shown(noise, 10**6, review.KeyGuard(), "user")
+        self.assertIn('{"a": [', plain)
+
+    def test_a_u_escape_left_undecoded_withholds_the_block(self):
+        """A quoted word, then an escape, then the escaped key literal: the string decode pairs
+        the wrong quotes, so the key literal stays escaped and its body showed. A \\u escape
+        whose reading adds a marker or rule match withholds the block; an undecodable block
+        never closes a key opened before it."""
+        b = self.SPLIT_BODY
+        lit = json.dumps(f"{self.SPLIT_BEGIN}\n{b}\n{self.SPLIT_END}\n").replace("-", "\\u002d")
+        for content in (f'see "x" \\u0020 {lit} ok', f'see "x" \\u0020 {lit} and {{"t": 1}}',
+                        lit.strip('"').replace("\\n", "\n")):  # no JSON at all, real line breaks
+            with self.subTest(content=content[:20]):
+                g = review.KeyGuard()
+                self.assertEqual(review.shown(content, 10**6, g, "user"), "[withheld: undecodable block]")
+                self.assertNotIn(b, review.redact(content))
+        # past DECODE_TRIES with a key open, an END spelled with \\u escapes closes nothing
+        g = review.KeyGuard({"open": True, "label": "RSA PRIVATE KEY", "source": "user"})
+        forged = '{"a": [' * (review.DECODE_TRIES + 50) + "\n" + self.SPLIT_END.replace("-", "\\u002d") + "\n"
+        self.assertEqual(review.shown(forged, 10**6, g, "user"), "[withheld: undecodable block]")
+        self.assertTrue(g.open)
+        self.assertEqual(review.shown(f"{b}\n", 10**6, g, "user").count(b), 0)
+        # an ordinary escape in prose changes nothing
+        self.assertEqual(review.shown('say "caf\\u00e9" twice', 10**6, review.KeyGuard(), "user"),
+                         'say "caf\\u00e9" twice')
 
     def test_reset_guard_needs_one_transcript_when_basenames_collide(self):
         """Two transcript paths with one basename were both cleared by reset-guard ID."""

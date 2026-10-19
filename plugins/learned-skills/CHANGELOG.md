@@ -28,8 +28,8 @@ build (0.3.2):
   the same place (the user's text, Claude's, or the very tool call, by its id), is
   withheld; a nested, mismatched or malformed `END` is body, and a guard of unknown source
   closes at no `END`. JSON line breaks are decided by the JSON parser, also for JSON inside
-  prose, and markers and credential shapes are matched on the decoded JSON, so `\u` escapes
-  can't hide a key; nothing outside JSON is unescaped. That state is saved per transcript beside its offset.
+  prose, and markers and credential shapes are matched on the decoded JSON (string literals included), so `\u`
+  escapes can't hide a key, and a block that can't be decoded that way is withheld whole; nothing outside JSON is unescaped. That state is saved per transcript beside its offset.
   There is no size bound: only the matching `END` line closes a key, so it fails closed. A
   stray `BEGIN` keeps the rest of that session out of reviews; `learned-status` shows it, and
   the new `/learned-skills:learned-reset-guard SESSION` clears that one session's guard

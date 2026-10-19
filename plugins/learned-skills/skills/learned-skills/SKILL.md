@@ -172,8 +172,11 @@ work's subject may leave the organization.
   before or after the marker keeps the key open. In JSON (a whole block, or a JSON document
   inside prose) the JSON parser decides what is a line break: `\n` is one, an escaped
   backslash then `n` is not, JSON inside JSON included. Markers and credential shapes are matched on the decoded JSON,
-  never only on the raw text, so a key spelled with `\u` escapes is still a key. Nothing
-  outside JSON is unescaped.
+  never only on the raw text, so a key spelled with `\u` escapes is still a key, also as a
+  bare JSON string literal. A block that can't be decoded that way (more than 256 candidate
+  JSON starts, or a `\u` escape left undecoded whose reading shows a marker or credential
+  shape) is withheld whole, and never closes a key opened before it. Nothing else outside
+  JSON is unescaped.
   There is no size bound: it fails closed. A stray `BEGIN` (a format note in prose, say) keeps
   the rest of that transcript out of reviews; `status` says so, and
   `/learned-skills:learned-reset-guard SESSION` (`cli.py reset-guard SESSION`, logged; the full

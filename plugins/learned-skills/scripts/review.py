@@ -59,21 +59,43 @@ def json_text(text):
     return "\n".join(out)
 
 
+DECODE_TRIES = 256  # raw_decode attempts per block: a run of unclosed braces costs each try the rest
+UNI_ESC = re.compile(r"(?<!\\)((?:\\\\)*)\\u([0-9a-fA-F]{4})")
+
+
+class DecodeBudget(Exception):
+    """A block too costly to decode as JSON: json_view then fails closed."""
+
+
+class WithholdBlock(Exception):
+    """json_view could not decode a block that may hold a credential: withhold all of it. The
+    \\u-unescaped text is carried so a key guard can still track BEGIN and END in it."""
+
+    def __init__(self, text):
+        super().__init__("withhold")
+        self.text = text
+
+
 def decode_json(text):
     """`text` with each JSON document in it (the whole text, or an object or array inside prose,
     as a pasted service-account file) replaced by json_text(): line breaks are then what JSON
     says they are, and nothing else in the text is unescaped."""
     if is_json(text):
         return json_text(text)
-    out, pos, dec = [], 0, json.JSONDecoder()
-    for m in re.finditer(r"[{\[]", text):
+    out, pos, dec, tries = [], 0, json.JSONDecoder(), 0
+    for m in re.finditer(r'[{\["]', text):
         if m.start() < pos:
             continue
+        tries += 1
+        if tries > DECODE_TRIES:
+            raise DecodeBudget()
         try:
             value, end = dec.raw_decode(text, m.start())
         except ValueError:
             continue
-        if isinstance(value, (dict, list)):
+        # An object or array, or a string literal that holds an escape (a top-level JSON
+        # string spelling the delimiters with \\u002d); a plain quoted word changes nothing.
+        if isinstance(value, (dict, list)) or (isinstance(value, str) and "\\" in text[m.start():end]):
             out.append(text[pos:m.start()])
             out.append(json_text(json.dumps(value)))
             pos = end
@@ -81,17 +103,44 @@ def decode_json(text):
     return "".join(out)
 
 
+def unescaped(text):
+    return UNI_ESC.sub(lambda m: m.group(1) + chr(int(m.group(2), 16)), text)
+
+
+def rule_hits(text):
+    return len(KEY_BEGIN.findall(text)) + sum(len(rx.findall(text)) for _, rx in SECRET_RULES)
+
+
+def checked(view):
+    """`view`, unless reading its remaining \\u escapes shows a marker or rule match that the
+    view itself lacks: a \\u escape left undecoded (a string literal paired with the wrong quote,
+    or no JSON at all) then withholds the whole block (fail closed)."""
+    if "\\u" in view:
+        uni = unescaped(view)
+        if rule_hits(uni) > rule_hits(view):
+            raise WithholdBlock(uni)
+    return view
+
+
 def json_view(text, inside_key=False):
     """`text`, or its JSON-decoded form (decode_json) when that is what a credential rule sees:
     JSON may spell a marker with escapes (\\u002d for "-"), so
     the raw text is not checked alone. Inside an open key the decoded form is always used."""
-    if "{" not in text and "[" not in text:
+    if not any(c in text for c in '{["'):
+        return checked(text)
+    try:
+        dec = decode_json(text)
+    except DecodeBudget:
+        # Too many candidates to parse. Read its \\u escapes alone; if a marker or a rule shows
+        # there, withhold the whole block rather than guess where the JSON ends (fail closed).
+        uni = unescaped(text)
+        if inside_key or KEY_BEGIN.search(uni) or any(rx.search(uni) for _, rx in SECRET_RULES):
+            raise WithholdBlock(uni)
         return text
-    dec = decode_json(text)
     if dec != text and (inside_key or KEY_BEGIN.search(dec)
                         or any(rx.search(dec) for _, rx in SECRET_RULES)):
-        return dec
-    return text
+        return checked(dec)
+    return checked(text)
 
 
 def is_json(text):
@@ -106,7 +155,10 @@ def is_json(text):
 def redact(text):
     """Credential shapes replaced by their rule name. Applied to everything the plugin writes
     from the review's own words: log lines, summaries, commit messages, notices, events."""
-    text = json_view(text)  # JSON escapes decoded first, by the JSON parser
+    try:
+        text = json_view(text)  # JSON escapes decoded first, by the JSON parser
+    except WithholdBlock:
+        return "[withheld: undecodable block]"
     for rule, rx in SECRET_RULES:
         text = rx.sub(f"[withheld: {rule}]", text)
     return text
@@ -188,7 +240,12 @@ def shown(s, n, guard=None, source=None):
     # JSON parser, so a JSON-pasted key's END is a line of its own exactly when JSON says so,
     # and a marker spelled with \u escapes is still a marker. Nothing outside JSON is
     # unescaped: a literal \n in plain text cannot fake an END line.
-    s = json_view(s, guard.open)
+    try:
+        s = json_view(s, guard.open)
+    except WithholdBlock as w:  # show none of it; a key it opens is tracked on what it saw
+        if not guard.open:  # an END read from \\u escapes outside JSON never closes an open key
+            shown(w.text.replace("{", "(").replace("[", "(").replace('"', "'"), n, guard, source)
+        return "[withheld: undecodable block]"
     out, pos = [], 0
     while pos <= len(s):
         if guard.open:
