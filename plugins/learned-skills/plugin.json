@@ -1,0 +1,19 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "learned-skills",
+  "version": "0.4.0",
+  "description": "Turns repeated work into reviewable skills. Every few turns a Stop hook starts a background claude -p review of the session transcript (credentials redacted, on your own account), which may create or patch learned-* skills in the project's .claude/skills, with a Learned notice and one-command undo. Off until a project opts in with .claude/learned-skills.json. Optional learning records, a git sink and a disclosure filter for teams.",
+  "author": {
+    "name": "karmaterminal"
+  },
+  "homepage": "https://github.com/karmaterminal/thornfield-plugins/tree/main/plugins/learned-skills",
+  "repository": "https://github.com/karmaterminal/thornfield-plugins",
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "learning",
+    "hooks",
+    "memory",
+    "undo"
+  ]
+}

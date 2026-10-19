@@ -1,0 +1,19 @@
+{
+  "description": "learned-skills: count turns and start a detached skill review (Stop); hand the session any Learned notices (UserPromptSubmit). Both no-op unless the project has .claude/learned-skills.json.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/on_stop.py\"", "timeout": 10 }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/on_prompt.py\"", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}
