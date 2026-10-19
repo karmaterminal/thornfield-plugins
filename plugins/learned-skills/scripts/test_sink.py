@@ -509,7 +509,7 @@ class Flow(unittest.TestCase):
             self.run_review(lambda w, r: write(f"{w}/learned-linked/SKILL.md",
                                                GOOD.format(n="learned-linked") + "REPLACED\n"))
         self.assertIn("not staged learned-linked: learned-linked/ext is a symlink", out.getvalue())
-        self.assertIn("not applied learned-linked: it was not staged", out.getvalue())
+        self.assertIn("not applied learned-linked: left out of staging", out.getvalue())
         self.assertNotIn("REPLACED", self.show("team/learnings", "learnings/skills/learned-linked/SKILL.md"))
         self.assertIn("learnings/skills/learned-linked/ext", self.remote_files())
         self.assertFalse(any(f.startswith("learnings/events/") for f in self.remote_files()))

@@ -23,8 +23,10 @@ build (0.3.2):
   and logs nothing about a sink. A sink that is configured but incomplete, unsafe or
   unreachable still keeps its items pending until it can take them.
 - Each digest block is redacted before any clip or cut to the digest's tail, so a cut can't
-  strip a private key's header and leave its body; the reviewer's stdout and summaries are
-  redacted before they are clipped, too.
+  strip a private key's header and leave its body. A key split across messages is withheld
+  too: after a `BEGIN` line with no `END`, later blocks are withheld whole up to the `END`, or
+  to the end of the digest. The reviewer's stdout, stderr and summaries are redacted before
+  they are clipped.
 - **Claude engine only.** The optional Copilot CLI engine (records only) is removed, with its
   transcript reader and the `engine_command` key. `engine` accepts only `claude`.
 - Neutral wording throughout, a README with a data and cost disclosure, and a `license` field in

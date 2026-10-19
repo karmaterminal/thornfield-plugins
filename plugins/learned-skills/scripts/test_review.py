@@ -116,6 +116,35 @@ class Transcripts(unittest.TestCase):
                     self.assertEqual(survived, [], f"{len(survived)} key-body chunks survived the cut")
                     self.assertIn("[withheld: private-key] after-key", text)
 
+    SPLIT_BODY = "MIIEowSPLIT" + "q7Xr2Lm9" * 8
+    SPLIT_BEGIN = "-----BEGIN RSA " + "PRIVATE KEY-----"
+    SPLIT_END = "-----END RSA " + "PRIVATE KEY-----"
+
+    def split_events(self, *texts):
+        """One user turn per text, except the last two, which are tool results."""
+        return self.events({"type": "user", "message": {"content": texts[0]}},
+                           *({"type": "user", "message": {"content": [{"type": "tool_result", "content": t}]}}
+                             for t in texts[1:]))
+
+    def test_a_key_split_across_two_messages_never_leaves_its_body(self):
+        """BEGIN in one block and the body and END in the next left the body visible."""
+        path = self.split_events(f"here is the key {self.SPLIT_BEGIN}",
+                                 f"{self.SPLIT_BODY}\n{self.SPLIT_BODY}\n{self.SPLIT_END} after-end",
+                                 "the next message survives")
+        text = review.digest(path, 0, 200_000)[0]
+        self.assertNotIn(self.SPLIT_BODY, text)
+        self.assertIn("here is the key [withheld: private-key]", text)
+        self.assertIn("[withheld: private-key] after-end", text)
+        self.assertIn("the next message survives", text)
+
+    def test_a_key_whose_end_never_arrives_withholds_to_the_end_of_the_digest(self):
+        path = self.split_events(f"key: {self.SPLIT_BEGIN}", self.SPLIT_BODY,
+                                 f"{self.SPLIT_BODY} and then some prose")
+        text = review.digest(path, 0, 200_000)[0]
+        self.assertNotIn(self.SPLIT_BODY, text)
+        self.assertNotIn("prose", text)
+        self.assertEqual(text.count("[withheld: private-key]"), 3)
+
     def test_session_labels(self):
         paths = [f"{self.tmp.name}/{name}.jsonl" for name in ("SESSION_A", "SESSION_B")]
         for path in paths:
@@ -513,7 +542,7 @@ class Apply(unittest.TestCase):
                              for r, ds, fs in os.walk(common.state_dir(self.proj)) for x in ds + fs))
         # A review that writes over a skill it was never shown can't replace it.
         for name in ("learned-linkdir", "learned-linkfile", "learned-ssh", "learned-fifo"):
-            self.assertIn(f"not applied {name}: it was not staged", log)
+            self.assertIn(f"not applied {name}: left out of staging", log)
         self.assertTrue(os.path.islink(f"{self.skills}/learned-linkdir"))
         self.assertTrue(os.path.islink(f"{self.skills}/learned-ssh/deep/er/ssh"))
         for p in (f"{outside}/linked-skill/SKILL.md", f"{self.skills}/learned-linkfile/SKILL.md",
@@ -533,6 +562,55 @@ class Apply(unittest.TestCase):
             self.run_review(lambda work: self.fail("the reviewer must not run"))
         self.assertIn("review refused: 1 symlink(s) or special file(s) in the reviewer dir", out.getvalue())
         self.assertEqual(common.load_state(common.state_dir(self.proj))["offsets"], {})
+
+    def test_a_name_left_out_of_staging_is_never_applied(self):
+        """A learned dir snapshot left out is invisible to the review; a dir the review writes
+        under that name must not replace it: live, nor in the sink with live: false, where the
+        changed-in-the-project check does not run."""
+        t = self.tmp.name
+        sink_skills = f"{t}/sink-skills"
+        for root in (self.skills, sink_skills):
+            write(f"{root}/learned-hidden/SKILL.md", GOOD.format(n="learned-hidden"))
+            os.symlink(f"{t}/elsewhere", f"{root}/learned-hidden/ref")
+
+        def fake(work):
+            write(f"{work}/learned-hidden/SKILL.md", GOOD.format(n="learned-hidden") + "REPLACED\n")
+        for live in (True, False):
+            with self.subTest(live=live):
+                write(f"{self.proj}/.claude/learned-skills.json", json.dumps({
+                    "idle_seconds": 0, "live": live, "sink": {"url": f"{t}/unused.git", "branch": "b"}}))
+                landed = []
+                with common.locked_state(common.state_dir(self.proj)) as st:
+                    st["offsets"] = {}  # the same turns again
+                out = io.StringIO()
+                with mock.patch.object(review.sink, "sink_skills", return_value=sink_skills), \
+                        mock.patch.object(review.sink, "write_sink",
+                                          side_effect=lambda cfg, sdir, items, log: landed.extend(items)), \
+                        contextlib.redirect_stdout(out):
+                    self.run_review(fake)
+                self.assertEqual([i["name"] for i in landed], [])
+                for root in (self.skills, sink_skills):
+                    with open(f"{root}/learned-hidden/SKILL.md") as fh:
+                        self.assertEqual(fh.read(), GOOD.format(n="learned-hidden"))
+                    self.assertTrue(os.path.islink(f"{root}/learned-hidden/ref"))
+                self.assertIn("not applied learned-hidden: left out of staging", out.getvalue())
+        self.assertEqual(self.git("log", "-1", "--format=%s").strip(), "init")
+
+    def test_reviewer_stderr_is_redacted_before_it_is_clipped(self):
+        """The 400-char clip cut a token in two, and log()'s own redaction no longer matched the
+        half that survived."""
+        def run_claude(cfg, sdir, prompt):
+            return types.SimpleNamespace(returncode=0, stdout="LEARNED nothing",
+                                         stderr="x" * 380 + " " + FAKE_TOKEN)
+        self.register(self.transcript)
+        review.run_claude = run_claude
+        sys.argv = ["review.py", self.proj, "--now"]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            review.main()
+        line = next(x for x in out.getvalue().splitlines() if "stderr:" in x)
+        self.assertNotIn(FAKE_TOKEN[:12], line)
+        self.assertIn("[withheld:", line)  # the marker itself may be clipped
 
     def more_turns(self, word):
         with open(self.transcript, "a") as fh:

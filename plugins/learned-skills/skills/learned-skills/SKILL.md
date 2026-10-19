@@ -162,7 +162,9 @@ work's subject may leave the organization.
 - **Redaction:** known credential shapes are redacted before the reviewer reads the digest:
   each rendered block passes the credential scan before any clip or cut to the digest's tail,
   so a cut can't strip the header a rule needs and leave the body. That covers a private key's
-  body too (PEM, encrypted PEM, PGP, JSON-escaped). An opaque password matches no shape and is kept out only by the review's own refusal, as is an over-broad description ("Use
+  body too (PEM, encrypted PEM, PGP, JSON-escaped), and one split across messages: after a
+  `BEGIN` line with no `END`, later blocks are withheld whole up to the `END`, or to the end of
+  the digest. An opaque password matches no shape and is kept out only by the review's own refusal, as is an over-broad description ("Use
   for every task") or a body that pipes a download to a shell; `undo` is the recovery. The state
   dir is `0700` and `digest.md` `0600`, like the transcripts it digests. The review's own words
   (its summaries, and the log of what it said) pass the credential scan too, also before any

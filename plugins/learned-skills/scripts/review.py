@@ -46,34 +46,55 @@ def clip(s, n):
     return s if len(s) <= n else s[:n] + f" …[{len(s) - n} more chars]"
 
 
-def shown(s, n):
+KEY_BEGIN = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----")
+KEY_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----")
+
+
+class KeyGuard:
+    """Across the blocks of one digest: open while a private-key (or PGP) block has begun and
+    its END has not come, so a key split over two messages never leaves its body visible."""
+    open = False
+
+
+def shown(s, n, guard=None):
     """One rendered block for the digest: redacted whole, then clipped. A rule such as
-    private-key needs its header, which a clip, or a later cut to the digest's tail, can drop."""
-    return clip(redact(str(s)), n)
+    private-key needs its header, which a clip, or a later cut to the digest's tail, can drop.
+    With a guard, a block inside an open key is withheld whole up to the END line, and one
+    that opens a key without closing it opens the guard."""
+    s, head = str(s), ""
+    if guard is not None and guard.open:
+        m = KEY_END.search(s)
+        if not m:
+            return "[withheld: private-key]"
+        guard.open, head, s = False, "[withheld: private-key] ", s[m.end():]
+    if guard is not None:
+        begins = [m.end() for m in KEY_BEGIN.finditer(s)]
+        guard.open = bool(begins) and not KEY_END.search(s, begins[-1])
+    return clip(head + redact(s), n)
 
 
-def render_blocks(role, content):
+def render_blocks(role, content, guard=None):
     if isinstance(content, str):
-        return [f"{role.upper()}: {shown(content, TEXT_CAP)}"]
+        return [f"{role.upper()}: {shown(content, TEXT_CAP, guard)}"]
     out = []
     for b in content or []:
         t = b.get("type") if isinstance(b, dict) else None
         if t == "text":
-            out.append(f"{role.upper()}: {shown(b.get('text', ''), TEXT_CAP)}")
+            out.append(f"{role.upper()}: {shown(b.get('text', ''), TEXT_CAP, guard)}")
         elif t == "tool_use":
-            out.append(f"TOOL {b.get('name')}: {shown(json.dumps(b.get('input'), ensure_ascii=False), TOOL_CAP)}")
+            out.append(f"TOOL {b.get('name')}: {shown(json.dumps(b.get('input'), ensure_ascii=False), TOOL_CAP, guard)}")
         elif t == "tool_result":
             c = b.get("content")
             if isinstance(c, list):
                 c = " ".join(x.get("text", "") for x in c if isinstance(x, dict))
             tag = "RESULT (error)" if b.get("is_error") else "RESULT"
-            out.append(f"{tag}: {shown(c, RESULT_CAP)}")
+            out.append(f"{tag}: {shown(c, RESULT_CAP, guard)}")
     return out
 
 
 def digest(transcript, offset, cap):
     """Renders the transcript from byte `offset` to its end. Returns (text, new_offset)."""
-    lines = []
+    lines, guard = [], KeyGuard()
     with open(transcript, "rb") as fh:
         fh.seek(offset)
         data = fh.read()
@@ -88,7 +109,7 @@ def digest(transcript, offset, cap):
         if e.get("isSidechain") or e.get("type") not in ("user", "assistant"):
             continue
         msg = e.get("message") or {}
-        lines.extend(render_blocks(msg.get("role", e["type"]), msg.get("content")))
+        lines.extend(render_blocks(msg.get("role", e["type"]), msg.get("content"), guard))
     text = "\n".join(lines)
     if len(text) > cap:
         text = "[earlier turns cut]\n" + text[-cap:]
@@ -539,7 +560,7 @@ def main():
         log(f"{cfg['engine']} timed out; nothing applied")
         return
     out = res.stdout
-    log(f"{cfg['engine']} exit {res.returncode}; stderr: {clip(res.stderr, 400)}")
+    log(f"{cfg['engine']} exit {res.returncode}; stderr: {clip(redact(res.stderr), 400)}")
     log(f"{cfg['engine']} said: {clip(redact(out)[-1500:], 1500)}")
     if res.returncode != 0:  # auth, quota, crash: a half-finished run applies nothing
         log(f"nothing applied ({cfg['engine']} exit not 0); the same turns are read again next time")
@@ -555,7 +576,7 @@ def main():
             log(f"ignored {n}: outside {common.PREFIX}*")
             continue
         if n in left_out:
-            log(f"not applied {n}: it was not staged ({left_out[n]}), so this review can't replace it")
+            log(f"not applied {n}: left out of staging ({left_out[n]})")
             continue
         why = check_skill(work, n, cfg["max_skill_bytes"])
         if why:
