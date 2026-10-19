@@ -381,6 +381,20 @@ class Apply(unittest.TestCase):
         self.assertIn("not a learned change", r.stderr)
         self.assertNotEqual(self.undo("hand-made").returncode, 0)
 
+    def test_review_now_output_also_lands_in_the_log(self):
+        self.register(self.transcript)
+        fake = f"{self.tmp.name}/bin/claude"
+        write(fake, "#!/bin/sh\ncat >/dev/null\necho 'LEARNED nothing'\n")
+        os.chmod(fake, 0o755)
+        cli = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli.py")
+        env = dict(os.environ, CLAUDE_PROJECT_DIR=self.proj,
+                   PATH=f"{os.path.dirname(fake)}:{os.environ['PATH']}")
+        r = subprocess.run([sys.executable, cli, "review-now"], capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("review end: nothing learned", r.stdout)
+        with open(os.path.join(common.state_dir(self.proj), "review.log")) as fh:
+            self.assertIn("review end: nothing learned", fh.read())
+
     def more_turns(self, word):
         with open(self.transcript, "a") as fh:
             for i in range(20):

@@ -100,6 +100,19 @@ def undo_saved(cfg, name, saved):
     print(f"undone: {name} (an uncommitted learned change; the working tree is as before it)")
 
 
+def review_now(proj):
+    """Runs the review in the foreground, its output both here and in review.log (where the Stop
+    hook's detached reviews write), so /learned-skills:learned-log shows it too."""
+    p = subprocess.Popen([sys.executable, os.path.join(HERE, "review.py"), proj, "--now"],
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    with open(os.path.join(common.state_dir(proj), "review.log"), "a") as log:
+        for line in p.stdout:
+            sys.stdout.write(line)
+            log.write(line)
+            log.flush()
+    return p.wait()
+
+
 def main():
     args = sys.argv[1:]
     proj = common.project_dir()
@@ -120,8 +133,7 @@ def main():
         need_config(proj)
         if not common.load_state(common.state_dir(proj))["transcripts"]:
             sys.exit("learned-skills: no transcript seen yet (the Stop hook records it after a turn)")
-        os.execvp(sys.executable, [sys.executable, os.path.join(HERE, "review.py"),
-                                   proj, "--now"])
+        sys.exit(review_now(proj))
     else:
         sys.exit(__doc__.strip())
 

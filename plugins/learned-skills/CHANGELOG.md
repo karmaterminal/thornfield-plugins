@@ -11,6 +11,8 @@ build (0.3.2):
   skill from before and after it, and `/learned-skills:learned-undo` restores from those. It
   refuses if the skill was edited by hand since. Committed changes are still undone with a
   revert commit.
+- `/learned-skills:learned-review-now` writes its output to the review log as well, so
+  `/learned-skills:learned-log` shows it, as the command's text always said.
 - **Claude engine only.** The optional Copilot CLI engine (records only) is removed, with its
   transcript reader and the `engine_command` key. `engine` accepts only `claude`.
 - Neutral wording throughout, a README with a data and cost disclosure, and a `license` field in
