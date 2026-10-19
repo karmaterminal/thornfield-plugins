@@ -145,6 +145,53 @@ class Transcripts(unittest.TestCase):
         self.assertNotIn("prose", text)
         self.assertEqual(text.count("[withheld: private-key]"), 3)
 
+    def prose(self, i):
+        """One 2000-byte user turn, marked m00, m01, ..."""
+        return {"type": "user", "message": {"content": f"m{i:02d} " + "w" * 1996}}
+
+    def test_a_stray_begin_releases_after_the_bound(self):
+        """A BEGIN with no END withholds 32 KB of text, not the rest of the transcript."""
+        self.events({"type": "user", "message": {"content": f"the format starts {self.SPLIT_BEGIN}"}},
+                    *(self.prose(i) for i in range(24)))
+        with mock.patch.object(review, "log") as logged:
+            text = review.digest(self.path, 0, 10**6)[0]
+        # 17 turns of 2000 bytes pass 32768: those 17 are withheld, the 18th is shown.
+        self.assertNotIn("m16 ", text)
+        self.assertIn("m17 ", text)
+        self.assertIn("m23 ", text)
+        logged.assert_called_once_with("key guard closed after 32 KB with no END")
+
+    def test_the_bound_holds_across_reviews(self):
+        """A guard saved open with 20000 bytes withheld closes 7 turns into the next review."""
+        self.events(*(self.prose(i) for i in range(12)))
+        state = {"transcripts": [self.path], "offsets": {},
+                 "key_guard": {self.path: {"open": True, "withheld": 20_000}}}
+        guards = {}
+        with mock.patch.object(review, "log"):
+            text = review.gather(state, 10**6, guards)[0]
+        self.assertNotIn("m06 ", text)
+        self.assertIn("m07 ", text)
+        self.assertEqual(guards, {self.path: None})
+
+    def test_a_replaced_transcript_resets_its_guard(self):
+        self.events(self.prose(0))
+        state = {"transcripts": [self.path], "offsets": {self.path: 10**6},  # past its size
+                 "key_guard": {self.path: {"open": True, "withheld": 0}}}
+        guards = {}
+        text = review.gather(state, 10**6, guards)[0]
+        self.assertIn("m00 ", text)
+        self.assertEqual(guards, {self.path: None})
+
+    def test_a_saved_guard_withholds_the_body_and_garbage_state_opens_nothing(self):
+        self.events({"type": "user", "message": {"content": f"{self.SPLIT_BODY}\n{self.SPLIT_END} after"}})
+        for saved, hidden in (({"open": True, "withheld": 5}, True), ("junk", False),
+                              ({"open": "yes", "withheld": 5}, False), ({"open": True, "withheld": -1}, True)):
+            with self.subTest(saved=saved):
+                state = {"transcripts": [self.path], "offsets": {}, "key_guard": {self.path: saved}}
+                text = review.gather(state, 10**6, {})[0]
+                self.assertEqual(self.SPLIT_BODY not in text, hidden)
+                self.assertIn("after", text)
+
     def test_session_labels(self):
         paths = [f"{self.tmp.name}/{name}.jsonl" for name in ("SESSION_A", "SESSION_B")]
         for path in paths:
@@ -611,6 +658,26 @@ class Apply(unittest.TestCase):
         line = next(x for x in out.getvalue().splitlines() if "stderr:" in x)
         self.assertNotIn(FAKE_TOKEN[:12], line)
         self.assertIn("[withheld:", line)  # the marker itself may be clipped
+
+    def test_a_begin_read_by_one_review_withholds_the_body_in_the_next(self):
+        """The guard is saved with the offset, in the same state update, and cleared at END."""
+        body = Transcripts.SPLIT_BODY
+        with open(self.transcript, "a") as fh:
+            fh.write(json.dumps({"type": "user", "message": {"content": f"key: {Transcripts.SPLIT_BEGIN}"}}) + "\n")
+        self.run_review(lambda work: None)
+        st = common.load_state(common.state_dir(self.proj))
+        self.assertEqual(st["key_guard"], {self.transcript: {"open": True, "withheld": 0}})
+        self.assertEqual(st["offsets"], {self.transcript: os.path.getsize(self.transcript)})
+        with open(self.transcript, "a") as fh:
+            fh.write(json.dumps({"type": "user", "message": {"content":
+                                 f"{body}\n{Transcripts.SPLIT_END} after-end"}}) + "\n")
+            for i in range(20):
+                fh.write(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": f"later {i}: " + "worked it out " * 20}]}}) + "\n")
+        seen = self.run_review(lambda work: None)
+        self.assertNotIn(body, seen["files"]["digest.md"])
+        self.assertIn("[withheld: private-key] after-end", seen["files"]["digest.md"])
+        self.assertEqual(common.load_state(common.state_dir(self.proj))["key_guard"], {})
 
     def more_turns(self, word):
         with open(self.transcript, "a") as fh:

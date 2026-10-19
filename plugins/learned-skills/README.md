@@ -122,7 +122,9 @@ full: the record format, how the sink's private clone works, and the filter cont
 - **Redaction is pattern-based.** Known credential shapes are redacted before the reviewer
   reads the digest: private keys (the whole block), GitHub, Anthropic, OpenAI, Slack, AWS,
   Google and Discord tokens, JWTs, SSH key blobs and padded base64. Each piece of the session is
-  redacted before it is shortened, so a cut can never leave half a key behind. The same scan
+  redacted before it is shortened, so a cut can never leave half a key behind. A key pasted
+  across several messages, or across two reviews, is withheld until its `END` line (for at most
+  32 KB of text). The same scan
   runs again on every file, log line, notice and commit the plugin writes, including the
   review's own output. An opaque secret, such as a plain password, matches no pattern. It
   reaches the review run, and only the review's own instructions keep it out of a skill.

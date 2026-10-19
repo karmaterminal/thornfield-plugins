@@ -50,10 +50,24 @@ KEY_BEGIN = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----")
 KEY_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----")
 
 
+KEY_GUARD_MAX = 32 << 10  # withheld text before a guard gives up; a 16384-bit RSA PEM is ~12 KB
+
+
 class KeyGuard:
-    """Across the blocks of one digest: open while a private-key (or PGP) block has begun and
-    its END has not come, so a key split over two messages never leaves its body visible."""
-    open = False
+    """Across the blocks of a transcript: open while a private-key (or PGP) block has begun and
+    its END has not come, so a key split over two messages never leaves its body visible. Saved
+    with the transcript's offset (state.json `key_guard`), so a body read by the next review is
+    withheld too. Bounded: it closes after KEY_GUARD_MAX of withheld text, so a stray BEGIN in
+    prose cannot blind a transcript for good."""
+
+    def __init__(self, saved=None):
+        saved = saved if isinstance(saved, dict) else {}
+        w = saved.get("withheld")
+        self.open = saved.get("open") is True
+        self.withheld = w if type(w) is int and 0 <= w < KEY_GUARD_MAX else 0
+
+    def saved(self):
+        return {"open": True, "withheld": self.withheld} if self.open else None
 
 
 def shown(s, n, guard=None):
@@ -65,11 +79,16 @@ def shown(s, n, guard=None):
     if guard is not None and guard.open:
         m = KEY_END.search(s)
         if not m:
+            guard.withheld += len(s.encode())
+            if guard.withheld >= KEY_GUARD_MAX:
+                guard.open, guard.withheld = False, 0
+                log("key guard closed after 32 KB with no END")
             return "[withheld: private-key]"
-        guard.open, head, s = False, "[withheld: private-key] ", s[m.end():]
+        guard.open, guard.withheld, head, s = False, 0, "[withheld: private-key] ", s[m.end():]
     if guard is not None:
         begins = [m.end() for m in KEY_BEGIN.finditer(s)]
-        guard.open = bool(begins) and not KEY_END.search(s, begins[-1])
+        if bool(begins) and not KEY_END.search(s, begins[-1]):
+            guard.open, guard.withheld = True, 0
     return clip(head + redact(s), n)
 
 
@@ -92,9 +111,9 @@ def render_blocks(role, content, guard=None):
     return out
 
 
-def digest(transcript, offset, cap):
+def digest(transcript, offset, cap, guard=None):
     """Renders the transcript from byte `offset` to its end. Returns (text, new_offset)."""
-    lines, guard = [], KeyGuard()
+    lines, guard = [], guard if guard is not None else KeyGuard()
     with open(transcript, "rb") as fh:
         fh.seek(offset)
         data = fh.read()
@@ -467,16 +486,20 @@ def label(transcript):
     return os.path.splitext(os.path.basename(transcript))[0]
 
 
-def gather(state, cap):
-    """Digest of every known transcript past its offset, oldest first. Returns (text, offsets)."""
+def gather(state, cap, guards=None):
+    """Digest of every known transcript past its offset, oldest first. Returns (text, offsets);
+    fills `guards` with each transcript's KeyGuard state, to save with its offset."""
     parts, offsets = [], {}
+    saved = state.get("key_guard") if isinstance(state.get("key_guard"), dict) else {}
     known = [t for t in state["transcripts"] if os.path.isfile(t)]
     for t in sorted(known, key=os.path.getmtime):
-        off = state["offsets"].get(t, 0)
+        off, guard = state["offsets"].get(t, 0), KeyGuard(saved.get(t))
         if off > os.path.getsize(t):
-            off = 0  # the transcript was replaced
-        text, end = digest(t, off, cap)
+            off, guard = 0, KeyGuard()  # the transcript was replaced: its guard goes with it
+        text, end = digest(t, off, cap, guard)
         offsets[t] = end
+        if guards is not None:
+            guards[t] = guard.saved()
         if text:
             parts.append(f"## session {label(t)}\n{text}")
     text = "\n\n".join(parts)
@@ -504,7 +527,8 @@ def main():
         log(f"review refused: engine must be claude, not {cfg['engine']!r}; nothing applied")
         return
     state = common.load_state(sdir)
-    text, new_offsets = gather(state, cfg["max_digest_bytes"])
+    new_guards = {}
+    text, new_offsets = gather(state, cfg["max_digest_bytes"], new_guards)
     # Each block was redacted before any clip or cut (shown); this pass catches a shape that
     # only the joined text forms.
     text = redact(text)
@@ -660,6 +684,13 @@ def main():
         log("review end: nothing learned")
     with common.locked_state(sdir) as state:
         state["offsets"].update(new_offsets)
+        if not isinstance(state.get("key_guard"), dict):
+            state["key_guard"] = {}
+        for t, g in new_guards.items():  # with the offset it belongs to, in the same update
+            if g:
+                state["key_guard"][t] = g
+            else:
+                state["key_guard"].pop(t, None)
 
 
 if __name__ == "__main__":

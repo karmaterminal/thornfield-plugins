@@ -101,7 +101,7 @@ def load_state(sdir):
     except (OSError, ValueError):
         st = {}
     for k, v in (("turns", 0), ("last_review", 0), ("last_attempt", 0), ("offsets", {}),
-                 ("transcripts", []), ("transcript", None)):
+                 ("transcripts", []), ("transcript", None), ("key_guard", {})):
         st.setdefault(k, v)
     return st
 
