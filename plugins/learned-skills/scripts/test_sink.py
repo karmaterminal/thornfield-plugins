@@ -231,7 +231,7 @@ class Flow(unittest.TestCase):
 
     def test_filter_context_is_merged_and_bad_json_withholds(self):
         write(self.filter, "#!/bin/sh\ngrep -q withhold-me \"$@\" && { echo not-json; exit 0; }\n"
-              "echo '{\"owner\": \"lane3\", \"fp\": \"abc\"}'\n")
+              "echo '{\"owner\": \"team\", \"fp\": \"abc\"}'\n")
         os.chmod(self.filter, 0o755)
         self.config(kind="both", sink=self.sink_cfg(), filter_command=[self.filter])
 

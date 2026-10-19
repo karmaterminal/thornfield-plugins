@@ -523,12 +523,12 @@ class Secrets(unittest.TestCase):
         self.assertEqual(self.scan(f"KEY={blob}"), ["padded-base64"])
 
     def test_pgp_private_key_block_refused(self):
-        self.assertEqual(self.scan("-----BEGIN PGP PRIVATE KEY " + "BLOCK-----"), ["private-key"])
+        self.assertEqual(self.scan("-----BEGIN PGP PRIVATE " + "KEY BLOCK-----"), ["private-key"])
 
     def test_private_key_rule_is_linear_on_a_long_run(self):
         """An unbounded header-name branch rescanned the run at every position: 22 s for 200 KB."""
         start = time.time()
-        review.redact("-----BEGIN PRIVATE KEY" + "-----" + "A" * 200_000)
+        review.redact("-----BEGIN PRIVATE " + "KEY-----" + "A" * 200_000)
         self.assertLess(time.time() - start, 2)
 
     def test_token_shapes_refused(self):
