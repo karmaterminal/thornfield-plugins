@@ -143,7 +143,7 @@ class Transcripts(unittest.TestCase):
                                  f"{self.SPLIT_BODY} and then some prose")
         text = review.digest(path, 0, 200_000)[0]
         self.assertNotIn(self.SPLIT_BODY, text)
-        self.assertNotIn("prose", text)
+        self.assertIn("and then some prose", text)  # shown: no key body is prose
         self.assertEqual(text.count("[withheld: private-key]"), 3)
 
     @staticmethod
@@ -171,7 +171,10 @@ class Transcripts(unittest.TestCase):
             with self.subTest(case=name):
                 text = review.digest(self.split_events(*texts), 0, 10**6)[0]
                 self.assertNotIn(self.SPLIT_BODY, text)
-                self.assertIn("[withheld: private-key] after-end", text)
+                # In one block the markers are space-joined: no END is a whole line, the key
+                # stays open, and the text after it is still shown (it is not key-shaped).
+                self.assertIn("[withheld: private-key] after-end" if "one block" not in name
+                              else "after-end", text)
 
     DECOYS = ("NOT_AN_END_LINE", "x", ", more", " prose")
 
@@ -195,11 +198,14 @@ class Transcripts(unittest.TestCase):
     def test_a_json_escaped_end_line_still_closes(self):
         """A JSON-escaped key has no real newline: its END is followed by a literal \\n or a quote."""
         m, b = self.marker, self.SPLIT_BODY
-        for tail in ("\\n", "\\\\n", '"', '\\"', "\\r\\n"):
+        for tail, closes in (("\\n", True), ("\\\\n", True), ("\\r\\n", True),
+                             # the END then more of the same line is not a whole END line: the
+                             # rest of that block is withheld too (fail closed), never the body shown
+                             ('"', False), ('\\"', False)):
             with self.subTest(tail=tail):
                 text = review.redact(f'{{"k": "{m("BEGIN", "RSA")}\\n{b}\\n{m("END", "RSA")}{tail}", "after": 1}}')
                 self.assertNotIn(b, text)
-                self.assertIn('"after": 1', text)
+                self.assertEqual('"after": 1' in text, closes)
 
     def test_the_single_block_rule_pairs_begin_with_its_own_end(self):
         """redact() alone (logs, summaries, check_skill's scan): BEGIN X runs to END X."""
@@ -207,7 +213,8 @@ class Transcripts(unittest.TestCase):
             with self.subTest(case=name):
                 text = review.redact(self.mismatched()[name][0])
                 self.assertNotIn(self.SPLIT_BODY, text)
-                self.assertEqual(text, "key [withheld: private-key]\nafter-end")
+                # space-joined: no END is a whole line, so the key runs to the end of the block
+                self.assertEqual(text, "key [withheld: private-key]")
 
     def test_a_mismatched_end_across_two_reviews_never_exposes_the_body(self):
         """The label is saved with the guard: review 2 still closes only on review 1's label."""
@@ -233,29 +240,61 @@ class Transcripts(unittest.TestCase):
         """One 2000-byte user turn, marked m00, m01, ..."""
         return {"type": "user", "message": {"content": f"m{i:02d} " + "w" * 1996}}
 
-    def test_a_stray_begin_releases_after_the_bound(self):
-        """A BEGIN with no END withholds 32 KB of text, not the rest of the transcript."""
+    def test_a_stray_begin_hides_only_key_shaped_runs(self):
+        """A BEGIN in prose with no END keeps the guard open, but only base64-looking runs are
+        withheld while it is open: ordinary text is shown, so it never blinds a transcript."""
         self.events({"type": "user", "message": {"content": f"the format starts {self.SPLIT_BEGIN}"}},
-                    *(self.prose(i) for i in range(24)))
+                    *({"type": "user", "message": {"content": f"m{i:02d} the ordinary words of turn {i}"}}
+                      for i in range(24)))
+        guard = review.KeyGuard()
         with mock.patch.object(review, "log") as logged:
-            text = review.digest(self.path, 0, 10**6)[0]
-        # 17 turns of 2000 bytes pass 32768: those 17 are withheld, the 18th is shown.
-        self.assertNotIn("m16 ", text)
-        self.assertIn("m17 ", text)
-        self.assertIn("m23 ", text)
-        logged.assert_called_once_with("key guard closed after 32 KB with no END")
+            text = review.digest(self.path, 0, 10**6, guard)[0]
+        for i in range(24):
+            self.assertIn(f"m{i:02d} the ordinary words of turn {i}", text)
+        self.assertTrue(guard.open)
+        logged.assert_not_called()
 
-    def test_the_bound_holds_across_reviews(self):
-        """A guard saved open with 20000 bytes withheld closes 7 turns into the next review."""
-        self.events(*(self.prose(i) for i in range(12)))
-        state = {"transcripts": [self.path], "offsets": {},
-                 "key_guard": {self.path: {"open": True, "withheld": 20_000}}}
+    def test_no_size_bound_a_long_body_stays_withheld_across_messages_and_reviews(self):
+        """A 32 KB bound once closed the guard, and the next
+        block's body (no BEGIN marker) reached the digest. Now nothing but the whole END line
+        with the opener's label closes it, however long the body and however many reviews."""
+        body = "\n".join(f"MIIEow{i:05d}" + "q7Xr2Lm9" * 7 for i in range(700))  # ~44 KB
+        half = len(body) // 2
+        self.events({"type": "user", "message": {"content": f"key {self.SPLIT_BEGIN}\n{body[:half]}"}})
+        state = {"transcripts": [self.path], "offsets": {}}
         guards = {}
-        with mock.patch.object(review, "log"):
-            text = review.gather(state, 10**6, guards)[0]
-        self.assertNotIn("m06 ", text)
-        self.assertIn("m07 ", text)
-        self.assertEqual(guards, {self.path: None})
+        text1, offsets = review.gather(state, 10**7, guards)
+        self.assertEqual(guards, {self.path: {"open": True, "label": "RSA PRIVATE KEY"}})
+        with open(self.path, "a") as fh:
+            fh.write(json.dumps({"type": "user", "message": {"content": "here is the rest, sorry:"}}) + "\n")
+            fh.write(json.dumps({"type": "user", "message": {"content": body[half:]}}) + "\n")
+            fh.write(json.dumps({"type": "user", "message": {"content": f"{self.SPLIT_END}\nafter-end"}}) + "\n")
+        state = {"transcripts": [self.path], "offsets": offsets, "key_guard": guards,
+                 "ident": {self.path: review.identity(self.path, offsets[self.path])}}
+        guards2 = {}
+        text2 = review.gather(state, 10**7, guards2)[0]
+        for text in (text1, text2):
+            self.assertNotIn("MIIEow", text)
+            self.assertNotIn("q7Xr2Lm9", text)
+        self.assertIn("here is the rest, sorry:", text2)  # commentary inside a key is shown,
+        self.assertIn("after-end", text2)                 # and does not end it
+        self.assertEqual(guards2, {self.path: None})
+
+    BOUNDARY = ("x{END}", "{END}x", "a {END} b", "{END}NOT_AN_END_LINE", "  {END}, more")
+
+    def test_only_a_whole_end_line_closes_in_both_paths(self):
+        """One table for the guard and for redact(): an END closes a key only
+        as a line of its own. Each decoy here leaves the key open, so the body after it stays hidden."""
+        m, b = self.marker, self.SPLIT_BODY
+        for decoy in self.BOUNDARY:
+            fake = decoy.format(END=m("END", "RSA"))
+            with self.subTest(decoy=decoy, path="guard"):
+                g = review.KeyGuard()
+                out = " ".join(review.shown(x, 10**6, g) for x in (f"k {m('BEGIN', 'RSA')}", fake, b))
+                self.assertNotIn(b, out)
+                self.assertTrue(g.open)
+            with self.subTest(decoy=decoy, path="redact"):
+                self.assertNotIn(b, review.redact(f"k {m('BEGIN', 'RSA')}\n{fake}\n{b}\n"))
 
     def read(self, state):
         """One review's gather, then its saves, as main() keeps them."""
@@ -329,13 +368,15 @@ class Transcripts(unittest.TestCase):
         self.events({"type": "user", "message": {"content": f"{self.SPLIT_BODY}\n{self.SPLIT_END}\nafter"}})
         rsa = "RSA PRIVATE KEY"
         # (saved, body hidden, text after the END shown)
-        for saved, hidden, after in (({"open": True, "withheld": 5, "label": rsa}, True, True),
-                                     ({"open": True, "withheld": -1, "label": rsa}, True, True),
+        for saved, hidden, after in (({"open": True, "label": rsa}, True, True),
+                                     # a 0.3.2 state with "withheld": the count is ignored
+                                     ({"open": True, "withheld": 5, "label": rsa}, True, True),
                                      ("junk", False, True), ({"open": "yes", "label": rsa}, False, True),
-                                     # an unreadable label: open until the bound, never closed early
-                                     ({"open": True, "withheld": 5}, True, False),
-                                     ({"open": True, "withheld": 5, "label": "x]-----"}, True, False),
-                                     ({"open": True, "withheld": 5, "label": "PGP PRIVATE KEY BLOCK"}, True, False)):
+                                     # an unreadable or other label: open for good (only its own
+                                     # END closes it), so the body stays hidden and prose is shown
+                                     ({"open": True, "withheld": 5}, True, True),
+                                     ({"open": True, "label": "x]-----"}, True, True),
+                                     ({"open": True, "label": "PGP PRIVATE KEY BLOCK"}, True, True)):
             with self.subTest(saved=saved):
                 state = {"transcripts": [self.path], "offsets": {}, "key_guard": {self.path: saved}}
                 text = review.gather(state, 10**6, {})[0]
@@ -816,8 +857,7 @@ class Apply(unittest.TestCase):
             fh.write(json.dumps({"type": "user", "message": {"content": f"key: {Transcripts.SPLIT_BEGIN}"}}) + "\n")
         self.run_review(lambda work: None)
         st = common.load_state(common.state_dir(self.proj))
-        self.assertEqual(st["key_guard"], {self.transcript: {"open": True, "withheld": 0,
-                                                             "label": "RSA PRIVATE KEY"}})
+        self.assertEqual(st["key_guard"], {self.transcript: {"open": True, "label": "RSA PRIVATE KEY"}})
         self.assertEqual(st["offsets"], {self.transcript: os.path.getsize(self.transcript)})
         self.assertEqual(st["ident"], {self.transcript: review.identity(self.transcript,
                                                                       os.path.getsize(self.transcript))})

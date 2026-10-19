@@ -37,6 +37,8 @@ def log(msg):
 def redact(text):
     """Credential shapes replaced by their rule name. Applied to everything the plugin writes
     from the review's own words: log lines, summaries, commit messages, notices, events."""
+    if KEY_BEGIN.search(text):  # so a JSON-escaped key's END is a line of its own
+        text = JSON_EOL.sub("\n", text)
     for rule, rx in SECRET_RULES:
         text = rx.sub(f"[withheld: {rule}]", text)
     return text
@@ -51,68 +53,79 @@ def clip(s, n):
 # BLOCK"). A key closes only at the END line with the same label: any other END is body.
 KEY_LABEL = r"[A-Z ]*PRIVATE KEY(?: BLOCK)?"
 KEY_BEGIN = re.compile(rf"-----BEGIN ({KEY_LABEL})-----")
-# An END marker counts only as a complete line: then end of text, a newline, a literal \n or
-# \r (a JSON-escaped key, escaped once or more), a quote (escaped or not), or } or ].
-# "-----END RSA PRIVATE KEY-----NOT_AN_END_LINE" is body.
-END_LINE = r"(?=[ \t]*(?:\Z|\r?\n|\\+[rn]|\\*[\"']|[}\]]))"
+# A BEGIN opens a key wherever it appears (fail closed). An END closes one only as a whole line:
+# after JSON-escaped newlines are turned into real ones, a line that is exactly the END marker
+# with the opener's label, give or take spaces, quotes, commas and closing brackets around it.
+# No lookaround edges: "x-----END ...", "-----END ...-----x" and "a -----END ... b" are body.
+JSON_EOL = re.compile(r"\\+[rn]")
+END_EDGE = r"[ \t\r\"',}\]]*"
 
 
 def key_end(label):
-    return re.compile(rf"-----END {re.escape(label)}-----{END_LINE}")
+    return re.compile(rf"^{END_EDGE}-----END {re.escape(label)}-----{END_EDGE}$", re.M)
 
 
-KEY_GUARD_MAX = 32 << 10  # withheld text before a guard gives up; a 16384-bit RSA PEM is ~12 KB
+# While a key is open, every base64 run that could be key material (20 or more characters, or 8
+# or more holding a digit, + / or =: PEM and PGP armor lines, split by newlines or by spaces
+# when a key was pasted on one line) is withheld with the separators between such runs. Any
+# other text, a plain word included, is shown, redacted.
+KEY_RUN = re.compile(r"(?:(?<![A-Za-z0-9+/=])(?=[A-Za-z0-9+/=]{20}|[A-Za-z]*[0-9+/=])[A-Za-z0-9+/=]{8,}"
+                     r"(?![A-Za-z0-9+/=])[\s\"',]*)+")
 
 
 class KeyGuard:
     """Across the blocks of a transcript: open, with the opening BEGIN's label, until the END
     line with that same label, so a key split over two messages never leaves its body visible
     and a mismatched END closes nothing. Saved with the transcript's offset (state.json
-    `key_guard`), so a body read by the next review is withheld too. Bounded: it closes after
-    KEY_GUARD_MAX of withheld text, so a stray BEGIN in prose cannot blind a transcript for good.
-    A saved guard with an unreadable label stays open until that bound."""
+    `key_guard`), so a body read by the next review is withheld too. No size bound, and nothing
+    but the matching END closes it: it fails closed. While open it withholds only lines that
+    could be key material (KEY_RUN) and shows the rest, so a stray BEGIN in prose hides
+    base64-looking runs of that transcript at most, never its ordinary text."""
 
     def __init__(self, saved=None):
         saved = saved if isinstance(saved, dict) else {}
-        w, label = saved.get("withheld"), saved.get("label")
+        label = saved.get("label")
         self.open = saved.get("open") is True
-        self.withheld = w if type(w) is int and 0 <= w < KEY_GUARD_MAX else 0
         self.label = label if isinstance(label, str) and re.fullmatch(KEY_LABEL, label) else None
 
     def saved(self):
-        return {"open": True, "withheld": self.withheld, "label": self.label} if self.open else None
+        return {"open": True, "label": self.label} if self.open else None
 
-    def withhold(self, text):
-        self.withheld += len(text.encode())
-        if self.withheld >= KEY_GUARD_MAX:
-            self.open, self.withheld, self.label = False, 0, None
-            log("key guard closed after 32 KB with no END")
+    @staticmethod
+    def inside(text):
+        """`text` from inside an open key: base64 runs withheld, everything else redacted."""
+        # Inside a key, a nested BEGIN marker is part of it: withheld here, so redact() below
+        # does not take it for a new key and swallow the rest of the block.
+        out = KEY_RUN.sub(" [withheld: private-key] ", KEY_BEGIN.sub(" [withheld: private-key] ", text))
+        return " ".join(redact(out).split()) or "[withheld: private-key]"
 
 
 def shown(s, n, guard=None):
     """One rendered block for the digest: redacted whole, then clipped. A rule such as
     private-key needs its header, which a clip, or a later cut to the digest's tail, can drop.
     With a guard, the block is walked in order: text outside a key is redacted, and everything
-    from a BEGIN to the END with its label (in this block or a later one) is withheld whole,
-    nested or mismatched BEGIN and END lines included."""
+    from a BEGIN to the whole END line with its label (in this block or a later one) is
+    inside the key: its base64 runs are withheld and anything else in it is shown, redacted
+    (KeyGuard.inside), nested or mismatched BEGIN and END markers included."""
     s = str(s)
     if guard is None:
         return clip(redact(s), n)
+    if guard.open or KEY_BEGIN.search(s):  # END lines are found on real line breaks
+        s = JSON_EOL.sub("\n", s)
     out, pos = [], 0
     while pos <= len(s):
         if guard.open:
             m = key_end(guard.label).search(s, pos) if guard.label else None
-            out.append("[withheld: private-key]")
+            out.append(guard.inside(s[pos:m.start() if m else len(s)]))
             if not m:
-                guard.withhold(s[pos:])
                 break
-            guard.open, guard.withheld, guard.label, pos = False, 0, None, m.end()
+            guard.open, guard.label, pos = False, None, m.end()
             continue
         m = KEY_BEGIN.search(s, pos)
         out.append(redact(s[pos:m.start() if m else len(s)]))
         if not m:
             break
-        guard.open, guard.withheld, guard.label, pos = True, 0, m.group(1), m.end()
+        guard.open, guard.label, pos = True, m.group(1), m.end()
     return clip(" ".join(out), n)
 
 
@@ -265,12 +278,12 @@ def restore(name, before, skills_dir):
 
 # Credential shapes refused in any learned file. Only the rule name is logged.
 SECRET_RULES = [
-    # BEGIN X through the complete END X line (a backreference; see END_LINE), or to the end
+    # BEGIN X through the complete END X line (a backreference; a whole END line, see key_end), or to the end
     # of the text: everything between, nested, mismatched or decoy END lines included, is
     # withheld, so PEM, encrypted PEM, PGP armor and JSON-escaped bodies need no shape of
     # their own. In the digest a block's BEGIN is already withheld by shown() first.
     ("private-key", re.compile(rf"-----BEGIN (?P<label>{KEY_LABEL})-----[\s\S]*?"
-                               rf"(?:-----END (?P=label)-----{END_LINE}|\Z)")),
+                               rf"(?:^{END_EDGE}-----END (?P=label)-----{END_EDGE}$|\Z)", re.M)),
     ("github-token", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})")),
     ("anthropic/openai-key", re.compile(r"\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}")),
     ("slack-token", re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}")),
