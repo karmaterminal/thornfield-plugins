@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1 (2026-10-19)
+
+- **JSON structure can no longer close a private-key guard.** Decoded JSON used to be joined
+  with line breaks between keys, values and array items. So with a key open, a later message such
+  as `{"note": "-----END RSA PRIVATE KEY-----"}` decoded to a whole END line, closed the guard,
+  and showed what followed. Decoded JSON is now joined by a separator that is not a line break
+  (`JSON_SEP`), at object and array edges too, so only a line break inside one string can bound
+  an END. A JSON string that ends right after its END line, with no trailing `\n`, now leaves
+  the guard open (fail closed); `/learned-skills:learned-reset-guard` clears it.
+
 ## 0.4.0 (2026-10-18): first public release
 
 The first release outside the private catalog it grew up in. Changes from the last private
