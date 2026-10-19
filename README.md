@@ -27,4 +27,14 @@ Each plugin lives in `plugins/NAME/` with its own `.claude-plugin/plugin.json`, 
 README and a CHANGELOG. `scripts/validate.sh` runs the manifest checks and every plugin's tests;
 CI runs the same script.
 
-Security issues: see [SECURITY.md](SECURITY.md). License: [MIT](LICENSE).
+## Privacy
+
+What each plugin reads, writes and sends: [PRIVACY.md](PRIVACY.md).
+
+## Support
+
+Questions, bugs and ideas: [GitHub issues](https://github.com/karmaterminal/thornfield-plugins/issues).
+Security issues: report them privately through GitHub's private vulnerability reporting, as
+[SECURITY.md](SECURITY.md) describes. Please don't open a public issue for one.
+
+License: [MIT](LICENSE).
