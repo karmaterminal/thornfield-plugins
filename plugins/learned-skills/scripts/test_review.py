@@ -360,6 +360,40 @@ class Transcripts(unittest.TestCase):
         self.assertNotIn(b, text)
         self.assertIn("after-end", text)
 
+    def test_json_escaped_marker_characters_never_hide_a_key(self):
+        """Valid JSON spelling the delimiters with
+        \\u002d slipped past the raw BEGIN check; json.loads turns it back into the key."""
+        b = self.SPLIT_BODY
+        key = f"{self.SPLIT_BEGIN}\n{b}\n{self.SPLIT_END}\n"
+        value = json.dumps(key)[1:-1]  # the JSON string's inside: escapes only in the value
+        esc = lambda chars: '{"private_key": "' + "".join(
+            f"\\u{ord(c):04x}" if c in chars else c for c in value) + '"}'
+        shapes = {"hyphens": esc("-"), "every delimiter char": esc("-BEGINENDRSAPRIVATEKY "),
+                  "label only": esc("RSAPRIVATEKY"), "mixed": esc("-EGKY")}
+        contents = []
+        for name, enc in shapes.items():
+            self.assertEqual(json.loads(enc)["private_key"], key, name)
+            contents += [enc, f"pasted: {enc} thanks"]
+        for content in contents:
+            with self.subTest(content=content[:20]):
+                self.events({"type": "user", "message": {"content": content}})
+                text = review.digest(self.path, 0, 10**6)[0]
+                self.assertNotIn(b, text)
+                self.assertNotIn(b, review.redact(text))
+                self.assertNotIn(b, review.redact(content))
+
+    def test_reset_guard_needs_one_transcript_when_basenames_collide(self):
+        """Two transcript paths with one basename were both cleared by reset-guard ID."""
+        d = os.path.dirname(self.path)
+        a, b = os.path.join(d, "x", "same.jsonl"), os.path.join(d, "y", "same.jsonl")
+        g = {"open": True, "label": "RSA PRIVATE KEY", "source": "user"}
+        state = {"key_guard": {a: dict(g), b: dict(g)}}
+        with mock.patch.object(review, "log"):
+            self.assertEqual(review.reset_guards(state, "same"), [])
+            self.assertEqual(set(state["key_guard"]), {a, b})
+            self.assertEqual(review.reset_guards(state, a), [a])
+        self.assertEqual(set(state["key_guard"]), {b})
+
     def test_four_character_fragments_never_show(self):
         """4-character body fragments (AQ== included) survived, across
         review calls too. Inside an open key nothing shows, in this review or the next."""
@@ -842,7 +876,7 @@ class Apply(unittest.TestCase):
             with self.subTest(bad=bad):
                 self.assertNotEqual(run("reset-guard", *bad).returncode, 0)
         self.assertEqual(len(common.load_state(sdir)["key_guard"]), 2)
-        self.assertIn("no open key guard for nope", run("reset-guard", "nope").stdout)
+        self.assertIn("nothing cleared: no single open key guard for nope", run("reset-guard", "nope").stdout)
         r = run("reset-guard", "t")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("cleared the key guard of t", r.stdout)

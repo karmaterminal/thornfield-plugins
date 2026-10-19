@@ -171,11 +171,14 @@ work's subject may leave the organization.
   0.3.2, or unreadable) closes at no `END`, only by reset. An `END` is a whole line only: text
   before or after the marker keeps the key open. In JSON (a whole block, or a JSON document
   inside prose) the JSON parser decides what is a line break: `\n` is one, an escaped
-  backslash then `n` is not, JSON inside JSON included. Nothing outside JSON is unescaped.
+  backslash then `n` is not, JSON inside JSON included. Markers and credential shapes are matched on the decoded JSON,
+  never only on the raw text, so a key spelled with `\u` escapes is still a key. Nothing
+  outside JSON is unescaped.
   There is no size bound: it fails closed. A stray `BEGIN` (a format note in prose, say) keeps
   the rest of that transcript out of reviews; `status` says so, and
-  `/learned-skills:learned-reset-guard SESSION` (`cli.py reset-guard SESSION`, logged) clears
-  that one transcript's guard, never another's, without replaying what was held. The state is
+  `/learned-skills:learned-reset-guard SESSION` (`cli.py reset-guard SESSION`, logged; the full
+  path, as the listing shows it, when two transcripts share an id) clears that one
+  transcript's guard, never another's, without replaying what was held. The state is
   kept in `state.json` (`key_guard`) beside the offset, which is bound to the file it was read
   from (`ident`: dev, inode and a hash of its first 4 KB, so a transcript replaced at the same
   path is read again from the start, guard reset). An opaque password matches no shape and is kept out only by the review's own refusal, as is an over-broad description ("Use

@@ -141,14 +141,15 @@ def main():
         sdir = common.state_dir(proj)
         if len(args) == 1:
             guards = common.load_state(sdir).get("key_guard") or {}
-            print("\n".join(f"open: {review.label(t)} ({(g or {}).get('label')})" for t, g in guards.items())
+            print("\n".join(f"open: {review.label(t)} ({(g or {}).get('label')}) {t}" for t, g in guards.items())
                   or "no open key guard")
             return
-        if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", args[1]):
-            sys.exit("learned-skills: reset-guard takes one session id, as status shows it")
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}|/[A-Za-z0-9._/-]{1,4000}\.jsonl", args[1]):
+            sys.exit("learned-skills: reset-guard takes one session id, as status shows it, or its full path")
         with common.locked_state(sdir) as st:
             cleared = review.reset_guards(st, args[1])
-        msg = f"cleared the key guard of {args[1]}" if cleared else f"no open key guard for {args[1]}"
+        msg = (f"cleared the key guard of {args[1]}" if cleared else
+               f"nothing cleared: no single open key guard for {args[1]} (an id two transcripts share needs the full path)")
         if cleared:  # in the review log too, where `log` shows it
             with open(os.path.join(sdir, "review.log"), "a") as fh:
                 fh.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} key guard reset for {args[1]} "

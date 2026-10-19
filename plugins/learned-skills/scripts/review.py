@@ -81,6 +81,19 @@ def decode_json(text):
     return "".join(out)
 
 
+def json_view(text, inside_key=False):
+    """`text`, or its JSON-decoded form (decode_json) when that is what a credential rule sees:
+    JSON may spell a marker with escapes (\\u002d for "-"), so
+    the raw text is not checked alone. Inside an open key the decoded form is always used."""
+    if "{" not in text and "[" not in text:
+        return text
+    dec = decode_json(text)
+    if dec != text and (inside_key or KEY_BEGIN.search(dec)
+                        or any(rx.search(dec) for _, rx in SECRET_RULES)):
+        return dec
+    return text
+
+
 def is_json(text):
     """True for text that is one JSON document (where \\n is an escaped line break)."""
     try:
@@ -93,8 +106,7 @@ def is_json(text):
 def redact(text):
     """Credential shapes replaced by their rule name. Applied to everything the plugin writes
     from the review's own words: log lines, summaries, commit messages, notices, events."""
-    if KEY_BEGIN.search(text):  # a JSON-escaped key's END as its own line, by the JSON parser
-        text = decode_json(text)
+    text = json_view(text)  # JSON escapes decoded first, by the JSON parser
     for rule, rx in SECRET_RULES:
         text = rx.sub(f"[withheld: {rule}]", text)
     return text
@@ -173,10 +185,10 @@ def shown(s, n, guard=None, source=None):
     if guard is None:
         return clip(redact(s), n)
     # JSON in the block (the whole block, or a JSON document inside prose) is decoded by the
-    # JSON parser, so a JSON-pasted key's END is a line of its own exactly when JSON says so.
-    # Nothing outside JSON is unescaped: a literal \n in plain text cannot fake an END line.
-    if guard.open or KEY_BEGIN.search(s):
-        s = decode_json(s)  # the serialization layer, decoded once by the JSON parser
+    # JSON parser, so a JSON-pasted key's END is a line of its own exactly when JSON says so,
+    # and a marker spelled with \u escapes is still a marker. Nothing outside JSON is
+    # unescaped: a literal \n in plain text cannot fake an END line.
+    s = json_view(s, guard.open)
     out, pos = [], 0
     while pos <= len(s):
         if guard.open:
@@ -833,15 +845,19 @@ def main():
 def reset_guards(state, session):
     """Clears one transcript's open key guard, logged: the recovery for a BEGIN that never gets
     its END, a format note in prose for example. `session` is the transcript's label as status
-    shows it; no other transcript's guard is touched (a reset must not release an unrelated real
-    key). Text after the guard is reviewed from the saved offset on, so nothing withheld is
-    replayed. Returns the transcripts cleared (none for an unknown label)."""
+    shows it, or its full path; it must name exactly one transcript (two paths with one
+    basename were both cleared), and no other transcript's guard is touched. Text after the
+    guard is reviewed from the saved offset on, so nothing withheld is replayed. Returns the
+    transcripts cleared: none for an unknown or ambiguous name."""
     guards = state.get("key_guard") if isinstance(state.get("key_guard"), dict) else {}
-    cleared = [t for t in list(guards) if label(t) == session]
-    for t in cleared:
-        del guards[t]
-        log(f"key guard reset for {label(t)} by cli.py reset-guard")
-    return cleared
+    match = [t for t in guards if session in (t, label(t))]
+    if len(match) != 1:
+        if match:
+            log(f"key guard not reset: {session} names {len(match)} transcripts; give the full path")
+        return []
+    del guards[match[0]]
+    log(f"key guard reset for {label(match[0])} by cli.py reset-guard")
+    return match
 
 
 if __name__ == "__main__":
