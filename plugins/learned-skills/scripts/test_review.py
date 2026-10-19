@@ -205,8 +205,9 @@ class Transcripts(unittest.TestCase):
                              # the END then more of the same line is not a whole END line: the
                              # rest of that block is withheld too (fail closed), never the body shown
                              ('"', False),
-                             # an escaped quote ends the JSON value's line after the marker
-                             ('\\"', True)):
+                             # an escaped quote, then the string's end: JSON structure is not a
+                             # line break, so the rest stays withheld (fail closed)
+                             ('\\"', False)):
             with self.subTest(tail=tail):
                 text = review.redact(f'{{"k": "{m("BEGIN", "RSA")}\\n{b}\\n{m("END", "RSA")}{tail}", "after": "yes"}}')
                 self.assertNotIn(b, text)
@@ -325,6 +326,56 @@ class Transcripts(unittest.TestCase):
         text2 = review.gather(state, 10**6, {})[0]
         self.assertNotIn("AQ==", text1 + text2)
         self.assertIn("after-end", text2)
+
+    def decoys(self):
+        """JSON keys, values and brackets were joined by line breaks, so these
+        made a whole END line; each is followed in the same block, or the next, by AQ==."""
+        e = self.SPLIT_END
+        return {"object": json.dumps({"note": e}),
+                "object, AQ== after": json.dumps({"note": e, "b": "AQ=="}),
+                "array": json.dumps(["x", e]),
+                "array, AQ== after": json.dumps([e, "AQ=="]),
+                "nested JSON": json.dumps({"a": json.dumps({"note": e})}),
+                "in prose": f"see {json.dumps({'note': e})} and AQ==",
+                "string end": json.dumps({"note": f"x\n{e}", "b": "AQ=="})}
+
+    def test_json_structure_never_makes_an_end_line(self):
+        for engine in ("claude", "copilot"):
+            for name, decoy in self.decoys().items():
+                with self.subTest(engine=engine, decoy=name):
+                    path = self.split_events(engine, f"key {self.SPLIT_BEGIN}", decoy, "AQ==",
+                                             f"{self.SPLIT_END}\nafter-end")
+                    text = review.digest(path, 0, 10**6)[0]
+                    self.assertNotIn("AQ==", text)
+                    self.assertIn("[withheld: private-key] after-end", text)
+
+    def test_json_structure_never_makes_an_end_line_across_reviews(self):
+        for name, decoy in self.decoys().items():
+            with self.subTest(decoy=name):
+                self.events({"type": "user", "message": {"content": f"key {self.SPLIT_BEGIN}"}},
+                            {"type": "user", "message": {"content": decoy}})
+                guards = {}
+                text1, offsets = review.gather({"transcripts": [self.path], "offsets": {}}, 10**6, guards)
+                self.assertTrue(guards[self.path]["open"])
+                with open(self.path, "a") as fh:
+                    fh.write(json.dumps({"type": "user", "message": {"content": "AQ=="}}) + "\n")
+                    fh.write(json.dumps({"type": "user", "message": {"content": f"{self.SPLIT_END}\nafter-end"}}) + "\n")
+                state = {"transcripts": [self.path], "offsets": offsets,
+                         "key_guard": json.loads(json.dumps(guards)),
+                         "ident": {self.path: review.identity(self.path, offsets[self.path])}}
+                text2 = review.gather(state, 10**6, {})[0]
+                self.assertNotIn("AQ==", text1 + text2)
+                self.assertIn("after-end", text2)
+
+    def test_a_json_pasted_key_with_its_own_line_breaks_still_closes(self):
+        """The fix keeps line breaks inside a string: a service-account file closes as before."""
+        b = self.SPLIT_BODY
+        doc = json.dumps({"type": "service_account",
+                          "private_key": f"{self.SPLIT_BEGIN}\n{b}\n{self.SPLIT_END}\n", "after": "yes"})
+        self.events({"type": "user", "message": {"content": doc}})
+        text = review.digest(self.path, 0, 10**6)[0]
+        self.assertNotIn(b, text)
+        self.assertIn("after", text.split("[withheld: private-key]")[-1])
 
     def test_one_tool_result_cannot_close_another_results_key(self):
         """Tool result B closed the guard tool result A opened (both were just

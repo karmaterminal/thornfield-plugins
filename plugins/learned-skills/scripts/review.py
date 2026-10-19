@@ -35,10 +35,17 @@ def log(msg):
     print(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} {redact(str(msg))}", flush=True)
 
 
+# Joins the strings of decoded JSON, and stands where an object or array starts and ends: never a
+# line break, never an END_EDGE character, so JSON structure cannot make a whole END line
+# ({"note": "-----END ..."} once decoded to "note", a line break, then the END). A line
+# break in decoded JSON is one inside a string; a key's END then needs one on each side.
+JSON_SEP = "\x1f"
+
+
 def json_text(text):
-    """The string values of a JSON document, decoded by the JSON parser and joined by line
-    breaks; a value that is itself a JSON document (JSON inside JSON) is decoded the same way.
-    So an escaped line break is one only when JSON says so, escaped backslashes included."""
+    """The string values of a JSON document, decoded by the JSON parser and joined by JSON_SEP;
+    a value that is itself a JSON document (JSON inside JSON) is decoded the same way. So an
+    escaped line break is one only when JSON says so, escaped backslashes included."""
     out = []
 
     def walk(v):
@@ -49,14 +56,18 @@ def json_text(text):
             else:
                 out.append(v)
         elif isinstance(v, dict):
+            out.append("")
             for k, x in v.items():
                 out.append(str(k))
                 walk(x)
+            out.append("")
         elif isinstance(v, list):
+            out.append("")
             for x in v:
                 walk(x)
+            out.append("")
     walk(json.loads(text))
-    return "\n".join(out)
+    return JSON_SEP.join(out)
 
 
 DECODE_TRIES = 256  # raw_decode attempts per block: a run of unclosed braces costs each try the rest
