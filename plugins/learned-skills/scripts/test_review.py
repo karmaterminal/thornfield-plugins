@@ -340,14 +340,13 @@ class Transcripts(unittest.TestCase):
                 "string end": json.dumps({"note": f"x\n{e}", "b": "AQ=="})}
 
     def test_json_structure_never_makes_an_end_line(self):
-        for engine in ("claude", "copilot"):
-            for name, decoy in self.decoys().items():
-                with self.subTest(engine=engine, decoy=name):
-                    path = self.split_events(engine, f"key {self.SPLIT_BEGIN}", decoy, "AQ==",
-                                             f"{self.SPLIT_END}\nafter-end")
-                    text = review.digest(path, 0, 10**6)[0]
-                    self.assertNotIn("AQ==", text)
-                    self.assertIn("[withheld: private-key] after-end", text)
+        for name, decoy in self.decoys().items():
+            with self.subTest(decoy=name):
+                path = self.split_events(f"key {self.SPLIT_BEGIN}", decoy, "AQ==",
+                                         f"{self.SPLIT_END}\nafter-end")
+                text = review.digest(path, 0, 10**6)[0]
+                self.assertNotIn("AQ==", text)
+                self.assertIn("[withheld: private-key] after-end", text)
 
     def test_json_structure_never_makes_an_end_line_across_reviews(self):
         for name, decoy in self.decoys().items():
