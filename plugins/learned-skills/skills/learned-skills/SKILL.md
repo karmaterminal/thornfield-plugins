@@ -175,13 +175,15 @@ work's subject may leave the organization.
   never only on the raw text, so a key spelled with `\u` escapes is still a key, also as a
   bare JSON string literal. A block that can't be decoded that way (more than 256 candidate
   JSON starts, or a `\u` escape left undecoded whose reading shows a marker or credential
-  shape) is withheld whole, and never closes a key opened before it. Nothing else outside
+  shape) is withheld whole; a `BEGIN` read in it opens a key, but no `END` read in it closes
+  one, its own or an earlier one. Nothing else outside
   JSON is unescaped.
   There is no size bound: it fails closed. A stray `BEGIN` (a format note in prose, say) keeps
   the rest of that transcript out of reviews; `status` says so, and
   `/learned-skills:learned-reset-guard SESSION` (`cli.py reset-guard SESSION`, logged; the full
   path, as the listing shows it, when two transcripts share an id) clears that one
-  transcript's guard, never another's, without replaying what was held. The state is
+  transcript's guard, never another's, without replaying what was held. Its unread text is
+  then reviewed as ordinary text, so a real key body still in it would reach the review. The state is
   kept in `state.json` (`key_guard`) beside the offset, which is bound to the file it was read
   from (`ident`: dev, inode and a hash of its first 4 KB, so a transcript replaced at the same
   path is read again from the start, guard reset). An opaque password matches no shape and is kept out only by the review's own refusal, as is an over-broad description ("Use

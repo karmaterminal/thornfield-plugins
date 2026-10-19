@@ -133,7 +133,9 @@ full: the record format, how the sink's private clone works, and the filter cont
   matching `END` line (in a note about key formats, say), the rest of that session is withheld
   from reviews, because it can't be told apart from a key. `/learned-skills:learned-status` says
   so; `/learned-skills:learned-reset-guard SESSION` clears that one session's guard (give the
-  full path it lists if two sessions share an id), and the review log records it. Only clear it when no real key is in that session.
+  full path it lists if two sessions share an id), and the review log records it. The session's
+  text not yet reviewed is then read as ordinary text, so a real key body still in it would
+  reach the review. Only clear it when no real key is in that session.
 - **A skill can still be wrong.** A review can learn a bad step from a bad session, or be steered
   by hostile text in the transcript. The safeguards are the checks above, the notice, and undo.
   Read what it writes.

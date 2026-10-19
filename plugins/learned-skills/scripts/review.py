@@ -242,9 +242,13 @@ def shown(s, n, guard=None, source=None):
     # unescaped: a literal \n in plain text cannot fake an END line.
     try:
         s = json_view(s, guard.open)
-    except WithholdBlock as w:  # show none of it; a key it opens is tracked on what it saw
-        if not guard.open:  # an END read from \\u escapes outside JSON never closes an open key
-            shown(w.text.replace("{", "(").replace("[", "(").replace('"', "'"), n, guard, source)
+    except WithholdBlock as w:
+        # Show none of it. A BEGIN read from its \\u escapes opens a key (fail closed), but no
+        # END read the same way closes one, this block's own or an earlier one: the guard stays
+        # open until a decoded, whole END.
+        m = KEY_BEGIN.search(w.text)
+        if m and not guard.open:
+            guard.open, guard.label, guard.source = True, m.group(1), source
         return "[withheld: undecodable block]"
     out, pos = [], 0
     while pos <= len(s):

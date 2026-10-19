@@ -12,7 +12,9 @@ Directly: python3 PLUGIN/scripts/cli.py ARGS.
   review-now        run a review now, in the foreground, of every known transcript
   reset-guard [SESSION]  list open private-key guards, or clear SESSION's (logged): after a
                     BEGIN with no END, that transcript's text is withheld from reviews until
-                    its END or this. Only the named transcript's guard is cleared.
+                    its END or this. Only the named transcript's guard is cleared, and its
+                    unread text is then reviewed as ordinary text, so a real key body still
+                    in it would reach the review: clear only when no real key was pasted.
 
 Run from the project (or set CLAUDE_PROJECT_DIR). Nothing happens until the project has
 .claude/learned-skills.json.
@@ -148,7 +150,9 @@ def main():
             sys.exit("learned-skills: reset-guard takes one session id, as status shows it, or its full path")
         with common.locked_state(sdir) as st:
             cleared = review.reset_guards(st, args[1])
-        msg = (f"cleared the key guard of {args[1]}" if cleared else
+        msg = (f"cleared the key guard of {args[1]}. Its text after the saved offset, unread so far,"
+               " is now reviewed as ordinary text: a real key body still in it would reach the"
+               " review with no BEGIN to hide it" if cleared else
                f"nothing cleared: no single open key guard for {args[1]} (an id two transcripts share needs the full path)")
         if cleared:  # in the review log too, where `log` shows it
             with open(os.path.join(sdir, "review.log"), "a") as fh:

@@ -426,6 +426,23 @@ class Transcripts(unittest.TestCase):
         self.assertEqual(review.shown('say "caf\\u00e9" twice', 10**6, review.KeyGuard(), "user"),
                          'say "caf\\u00e9" twice')
 
+    def test_an_undecodable_block_never_synthesizes_an_end(self):
+        """An undecodable block opened a fresh guard and closed it on a \\u-spelled END in the
+        same block, so the next block's body showed."""
+        begin, end = self.SPLIT_BEGIN, self.SPLIT_END
+        esc_end = end.replace("-", "\\u002d")
+        noise = '{"x": [' * (review.DECODE_TRIES + 50)
+        for name, opener in (("plain BEGIN", begin), ("escaped BEGIN", begin.replace("-", "\\u002d"))):
+            with self.subTest(case=name):
+                g = review.KeyGuard()
+                blk = f"{opener}\n{noise}\n{esc_end}\n"
+                self.assertEqual(review.shown(blk, 10**6, g, "user"), "[withheld: undecodable block]")
+                self.assertTrue(g.open)
+                self.assertNotIn("CONTINUATION", review.shown("PRIVATE-BODY-CONTINUATION", 10**6, g, "user"))
+                out = review.shown(f"{end}\nafter-end", 10**6, g, "user")
+                self.assertIn("after-end", out)
+                self.assertFalse(g.open)
+
     def test_reset_guard_needs_one_transcript_when_basenames_collide(self):
         """Two transcript paths with one basename were both cleared by reset-guard ID."""
         d = os.path.dirname(self.path)
