@@ -12,7 +12,11 @@ import unittest
 from unittest import mock
 
 sys.dont_write_bytecode = True
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# The plugin's scripts, which this file tests from outside the shipped plugin folder.
+PLUGIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "learned-skills")
+PLUGIN = os.path.realpath(PLUGIN)
+SCRIPTS = os.path.join(PLUGIN, "scripts")
+sys.path.insert(0, SCRIPTS)
 import common  # noqa: E402
 import review  # noqa: E402
 import sink  # noqa: E402

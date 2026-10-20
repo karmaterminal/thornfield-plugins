@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.2 (2026-10-20)
+
+For the plugin directory's checks. No behaviour change.
+
+- **An icon**, `.claude-plugin/icon.png` (1024 px square).
+- **The tests no longer ship.** They moved from `scripts/` to the repository's
+  `tests/learned-skills/`, so an installed plugin holds only what runs.
+- **Every environment variable the plugin reads is named literally**: the review guard in both
+  hooks, and the four `LEARNED_SKILLS_SINK_*` overrides. Before, those names were built at run time.
+
 ## 0.4.1 (2026-10-19)
 
 - **JSON structure can no longer close a private-key guard.** Decoded JSON used to be joined
