@@ -13,7 +13,7 @@ import common  # noqa: E402
 
 
 def main():
-    if os.environ.get(common.GUARD_ENV):
+    if os.environ.get("LEARNED_SKILLS_REVIEW"):  # common.GUARD_ENV, spelled out
         return
     try:
         hook = json.load(sys.stdin)

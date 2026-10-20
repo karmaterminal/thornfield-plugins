@@ -219,7 +219,14 @@ DEFAULT_BRANCHES = {"main", "master", "trunk", "default"}
 CLONE_MARKER = "learned-skills-sink-clone"  # inside .git/, so it is never committed
 
 
-SINK_ENV = tuple(f"LEARNED_SKILLS_SINK_{k}" for k in ("URL", "REPO", "BRANCH", "PATH"))
+# Spelled out, not built, so every environment variable the plugin reads is named literally.
+SINK_ENV_KEYS = {
+    "url": "LEARNED_SKILLS_SINK_URL",
+    "repo": "LEARNED_SKILLS_SINK_REPO",
+    "branch": "LEARNED_SKILLS_SINK_BRANCH",
+    "path": "LEARNED_SKILLS_SINK_PATH",
+}
+SINK_ENV = tuple(SINK_ENV_KEYS.values())
 
 
 def sink_set(cfg):
@@ -232,8 +239,8 @@ def sink_config(cfg):
     """The sink, with LEARNED_SKILLS_SINK_{URL,REPO,BRANCH,PATH} overriding the config per host.
     None when no sink is set or it is unsafe (a path escaping the repo)."""
     s = dict(cfg.get("sink") or {})
-    for key in ("url", "repo", "branch", "path"):
-        v = os.environ.get(f"LEARNED_SKILLS_SINK_{key.upper()}")
+    for key, name in SINK_ENV_KEYS.items():
+        v = os.environ.get(name)
         if v:
             s[key] = v
     if not (s.get("url") or s.get("repo")) or not s.get("branch"):

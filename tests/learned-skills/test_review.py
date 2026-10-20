@@ -17,7 +17,11 @@ import unittest
 from unittest import mock
 
 sys.dont_write_bytecode = True  # a cached .pyc would hold the folded fake token
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# The plugin's scripts, which this file tests from outside the shipped plugin folder.
+PLUGIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "learned-skills")
+PLUGIN = os.path.realpath(PLUGIN)
+SCRIPTS = os.path.join(PLUGIN, "scripts")
+sys.path.insert(0, SCRIPTS)
 import common  # noqa: E402
 import review  # noqa: E402
 
@@ -944,7 +948,7 @@ class Apply(unittest.TestCase):
         self.assertEqual(common.load_state(sdir)["turns"], 9)
 
     def undo(self, name):
-        cli = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli.py")
+        cli = os.path.join(SCRIPTS, "cli.py")
         env = dict(os.environ, CLAUDE_PROJECT_DIR=self.proj)
         return subprocess.run([sys.executable, cli, "undo", name], capture_output=True, text=True, env=env)
 
@@ -976,7 +980,7 @@ class Apply(unittest.TestCase):
         guard = {"open": True, "label": "RSA PRIVATE KEY", "source": "user"}
         with common.locked_state(sdir) as st:
             st["key_guard"] = {self.transcript: dict(guard), other: dict(guard)}
-        cli = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli.py")
+        cli = os.path.join(SCRIPTS, "cli.py")
         env = dict(os.environ, CLAUDE_PROJECT_DIR=self.proj)
         run = lambda *a: subprocess.run([sys.executable, cli, *a], capture_output=True, text=True, env=env)
         self.assertIn("key guard open in t (RSA PRIVATE KEY)", run("status").stdout)
@@ -1007,7 +1011,7 @@ class Apply(unittest.TestCase):
         fake = f"{self.tmp.name}/bin/claude"
         write(fake, "#!/bin/sh\ncat >/dev/null\necho 'LEARNED nothing'\n")
         os.chmod(fake, 0o755)
-        cli = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli.py")
+        cli = os.path.join(SCRIPTS, "cli.py")
         env = dict(os.environ, CLAUDE_PROJECT_DIR=self.proj,
                    PATH=f"{os.path.dirname(fake)}:{os.environ['PATH']}")
         r = subprocess.run([sys.executable, cli, "review-now"], capture_output=True, text=True, env=env)
@@ -1195,7 +1199,7 @@ class Apply(unittest.TestCase):
         self.assertTrue(os.path.isfile(f"{self.skills}/learned-good/SKILL.md"))
         self.assertEqual(self.git("log", "-1", "--format=%s").strip(), "default config")
         self.assertEqual(self.git("diff", "--cached", "--name-only"), "")
-        hook = os.path.join(os.path.dirname(os.path.abspath(__file__)), "on_prompt.py")
+        hook = os.path.join(SCRIPTS, "on_prompt.py")
         r = subprocess.run([sys.executable, hook], input="{}", capture_output=True, text=True,
                            env=dict(os.environ, CLAUDE_PROJECT_DIR=self.proj))
         self.assertIn("💾 Learned: created learned-good", r.stdout)
@@ -1244,7 +1248,7 @@ class Commands(unittest.TestCase):
     quoting can make $ARGUMENTS safe there: no `!` line may carry user text at all."""
 
     def test_no_arguments_in_shell_lines(self):
-        d = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "commands")
+        d = os.path.join(PLUGIN, "commands")
         for f in sorted(os.listdir(d)):
             with open(os.path.join(d, f)) as fh:
                 for n, line in enumerate(fh, 1):
@@ -1253,7 +1257,7 @@ class Commands(unittest.TestCase):
                             self.assertNotIn(bad, line, f"{f}:{n}")
 
     def test_cli_refuses_unknown_verbs_and_names(self):
-        cli = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli.py")
+        cli = os.path.join(SCRIPTS, "cli.py")
         for args in (["status;", "touch", "/tmp/x"], ["undo", "learned-x'; touch /tmp/x; '"],
                      ["undo", "learned-$(touch /tmp/x)"], ["rm"]):
             r = subprocess.run([sys.executable, cli, *args], capture_output=True, text=True,
@@ -1332,6 +1336,14 @@ class Secrets(unittest.TestCase):
     def test_token_shapes_refused(self):
         self.assertIn("github-token", self.scan(FAKE_TOKEN))
         self.assertIn("aws-key", self.scan("AKIA" + "ABCDEFGHIJKLMNOP"))
+
+
+class LiteralEnvNames(unittest.TestCase):
+    def test_hooks_spell_the_guard_env_as_common_defines_it(self):
+        self.assertEqual(common.GUARD_ENV, "LEARNED_SKILLS_REVIEW")
+        for hook in ("on_prompt.py", "on_stop.py"):
+            with open(os.path.join(SCRIPTS, hook)) as f:
+                self.assertIn('os.environ.get("LEARNED_SKILLS_REVIEW")', f.read())
 
 
 if __name__ == "__main__":
