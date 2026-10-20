@@ -37,7 +37,7 @@ In Claude Code:
 /plugin install causal-bug-proof@thornfield-plugins
 ```
 
-## Use
+## Try it
 
 Describe the bug. Claude loads the skill when the request fits, or you can ask for it by name. For
 example:
@@ -59,10 +59,15 @@ A revert-proven fix is load-bearing for its test. That doesn't make it the only 
 smallest one, and it doesn't show that a production incident is cured: that takes an end-to-end or live
 run shaped like the incident. The skill says so in its reports.
 
+## Privacy
+
+The plugin collects and sends nothing; see the repository's
+[privacy policy](../../PRIVACY.md#causal-bug-proof).
+
 ## Support
 
 Report problems and ideas in the repository's
-[issues](https://github.com/karmaterminal/thornfield-plugins/issues). Report security issues as its
+[issues](https://github.com/karmaterminal/thornfield-plugins/issues). Report security issues privately, as its
 [security policy](https://github.com/karmaterminal/thornfield-plugins/security/policy) describes.
 
 ## License

@@ -77,6 +77,16 @@ By default the change is only in your working tree. Then:
 The plugin also ships a `learned-skills` skill, so Claude knows how to read a notice, when to
 undo, and how a learned skill differs from memory.
 
+## Try it
+
+In a project you have opted in, ask Claude:
+
+- "Is learned-skills on in this project? Tell me what a review would send, and when the next
+  one runs."
+- "Run a learned-skills review now and show me what it learned, if anything."
+- "That last 💾 Learned notice: show me the skill it changed, and undo it if the steps don't
+  match what we actually did."
+
 ## Configuration
 
 All keys are optional, in `.claude/learned-skills.json`:
@@ -151,6 +161,18 @@ full: the record format, how the sink's private clone works, and the filter cont
 - **Main session only.** Subagent transcripts aren't read. Long tool output is cut.
 - **No pruning.** Unused learned skills stay until you undo or delete them.
 - Claude Code only, on Linux and macOS (the hooks use `fcntl`).
+
+## Privacy
+
+What the plugin reads, writes and sends, and how to delete it, is in the repository's
+[privacy policy](../../PRIVACY.md#learned-skills).
+
+## Support
+
+Report problems and ideas in the repository's
+[issues](https://github.com/karmaterminal/thornfield-plugins/issues). Report security issues
+privately, as its [security policy](https://github.com/karmaterminal/thornfield-plugins/security/policy)
+describes.
 
 ## Uninstall
 
