@@ -8,6 +8,7 @@
   "homepage": "https://github.com/karmaterminal/thornfield-plugins/tree/main/plugins/causal-bug-proof",
   "repository": "https://github.com/karmaterminal/thornfield-plugins",
   "license": "MIT",
+  "privacyPolicyUrl": "https://github.com/karmaterminal/thornfield-plugins/blob/main/PRIVACY.md",
   "keywords": [
     "debugging",
     "root-cause",
