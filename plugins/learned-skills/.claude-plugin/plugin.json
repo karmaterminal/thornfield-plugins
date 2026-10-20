@@ -9,6 +9,7 @@
   "homepage": "https://github.com/karmaterminal/thornfield-plugins/tree/main/plugins/learned-skills",
   "repository": "https://github.com/karmaterminal/thornfield-plugins",
   "license": "MIT",
+  "privacyPolicyUrl": "https://github.com/karmaterminal/thornfield-plugins/blob/main/PRIVACY.md",
   "keywords": [
     "skills",
     "learning",
