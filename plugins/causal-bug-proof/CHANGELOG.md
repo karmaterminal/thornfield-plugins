@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 (2026-10-20)
+
+- **An icon** for the plugin directory, `.claude-plugin/icon.png` (1024 px square). No change to the skill.
+
 ## 0.1.0 (2026-10-19): first public release
 
 A fresh, standalone version of a method first written for a private plugin catalog. Changes from
