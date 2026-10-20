@@ -232,6 +232,7 @@ git apply -R "$PATCH" || exit 1   # the fix is out and the fossil stays
 FOSSIL_TEST_COMMAND               # expect a failure
 git apply "$PATCH" || exit 1      # the fix is back
 FOSSIL_TEST_COMMAND               # expect a pass
+rm -f "$PATCH"
 ```
 
 This shows that the fix is load-bearing for the fossil. It doesn't show that the fix is the only one or

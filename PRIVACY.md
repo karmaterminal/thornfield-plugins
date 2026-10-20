@@ -23,12 +23,12 @@ templates may create:
 - a git worktree beside your checkout (`../bisect-worktree`), which the template removes when the
   bisect ends;
 - a temporary patch file (from `mktemp`) holding the diff of the fix, in your system's temporary
-  directory;
+  directory, which the template removes at the end;
 - the test, fix and report you ask for, in your project.
 
 Nothing else is written, and nothing leaves your machine except as part of your normal Claude Code
 session. To remove it, uninstall the plugin; delete any leftover worktree with
-`git worktree remove` and any temporary patch file by hand.
+`git worktree remove`, and any temporary patch file left by an interrupted run by hand.
 
 ## learned-skills
 

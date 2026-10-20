@@ -11,7 +11,8 @@ You read it, then keep it or undo it. Nothing happens in a project until you opt
 > does. At the default cadence a review runs after every 8 turns, at most once every 20 minutes,
 > with the `sonnet` model. The reviewer can read exactly these, and nothing else:
 >
-> - a digest of the session transcript since the last review, up to `max_digest_bytes` (200 KB by
+> - a digest of this project's transcripts (up to the 50 most recent sessions, so earlier sessions'
+>   unreviewed turns too) since each one's last review, up to `max_digest_bytes` (200 KB by
 >   default), with known credential shapes redacted (other secrets are not; see
 >   [Privacy and limits](#privacy-and-limits));
 > - copies of the project's `learned-*` skills, the only skills it may change;
@@ -20,7 +21,9 @@ You read it, then keep it or undo it. Nothing happens in a project until you opt
 > - copies of any `context_files` you list in the config (none by default), as they are.
 >
 > The text goes nowhere else: no third-party service, no telemetry. If you configure a `sink`,
-> the skills and learning records a review writes (not the transcript) go to that git remote too.
+> the skills and learning records a review writes (not the transcript) go to that git remote too,
+> with a change event per skill. Records and events name the reviewed session ids and, unless you
+> set `"host": false`, this machine's hostname.
 >
 > The review run loads no user or project settings, so an `env` block in your `settings.json`
 > doesn't apply to it. If you route Claude Code through a gateway, Bedrock or Vertex with
@@ -157,7 +160,8 @@ full: the record format, how the sink's private clone works, and the filter cont
   Read what it writes.
 - **Local state.** Turn counts, transcript offsets, the review log, the last digest, undo copies
   and, only when a sink is configured, items waiting for it live in `~/.local/state/learned-skills/` (or `$XDG_STATE_HOME`),
-  with `0700` permissions; the digest file is `0600`.
+  in `0700` directories; the digest file is `0600`, other files take your umask. The review log is
+  never trimmed and keeps the last 1,500 characters of each (redacted) reviewer reply.
 - **Main session only.** Subagent transcripts aren't read. Long tool output is cut.
 - **No pruning.** Unused learned skills stay until you undo or delete them.
 - Claude Code only, on Linux and macOS (the hooks use `fcntl`).
