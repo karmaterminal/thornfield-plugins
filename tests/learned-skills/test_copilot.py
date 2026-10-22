@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 import subprocess
+import time
 import sys
 import tempfile
 import unittest
@@ -216,6 +217,67 @@ class Copilot(unittest.TestCase):
         with mock.patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
             with mock.patch.object(subprocess, "run", side_effect=run):
                 with self.assertRaisesRegex(review.ReviewRefused, "gh auth login"):
+                    review.run_copilot(self.cfg(), self.rdir, "fixture")
+
+    def forker(self, name, then):
+        """A fake engine that forks a sleeping child (pid to a file), then runs `then`."""
+        pidfile = os.path.join(self.root, name + ".pid")
+        path = os.path.join(self.root, "bin", name)
+        write(path, "#!" + sys.executable + "\nimport subprocess, sys, time\n"
+              f"child = subprocess.Popen(['sleep', '300'])\nopen({pidfile!r}, 'w').write(str(child.pid))\n"
+              + then + "\n")
+        os.chmod(path, 0o700)
+        return path, pidfile
+
+    def assert_gone(self, pidfile):
+        with open(pidfile) as fh:
+            pid = int(fh.read())
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            with open(f"/proc/{pid}/stat") as fh:  # reparented zombies count as gone
+                if fh.read().rsplit(")", 1)[1].split()[0] == "Z":
+                    return
+            time.sleep(0.05)
+        os.kill(pid, 9)
+        self.fail(f"descendant {pid} outlived the engine call")
+
+    def test_timeout_kills_every_descendant(self):
+        path, pidfile = self.forker("hang", "time.sleep(300)")
+        with self.assertRaises(subprocess.TimeoutExpired):
+            review.run_group([path], timeout=1)
+        self.assert_gone(pidfile)
+
+    def test_normal_exit_reaps_forked_descendants(self):
+        path, pidfile = self.forker("leaver", "sys.exit(0)")
+        self.assertEqual(review.run_group([path], timeout=30).returncode, 0)
+        self.assert_gone(pidfile)
+
+    def test_gh_copilot_shim_is_refused_before_any_launch(self):
+        shim = os.path.join(self.root, "bin", "copilot-shim")
+        write(shim, '#!/bin/sh\nPATH=$(echo "$PATH" | sed "s|$HOME/.local/bin:||")\nexec gh copilot "$@"\n')
+        os.chmod(shim, 0o700)
+        with mock.patch.object(review, "run_group", side_effect=AssertionError("launched")):
+            with self.assertRaisesRegex(review.ReviewRefused, "gh copilot"):
+                review.run_copilot(self.config(engine="copilot", engine_command=[shim]), self.rdir, "p")
+
+    def test_classic_pat_is_refused_from_env_and_gh(self):
+        with mock.patch.dict(os.environ, {"COPILOT_GITHUB_TOKEN": "ghp_" + "x" * 36}):
+            with self.assertRaisesRegex(review.ReviewRefused, "classic"):
+                review.run_copilot(self.cfg(), self.rdir, "fixture")
+        original = subprocess.run
+
+        def run(argv, **kwargs):
+            if argv[:3] == ["gh", "auth", "token"]:
+                return subprocess.CompletedProcess(argv, 0, "ghp_" + "y" * 36 + "\n", "")
+            return original(argv, **kwargs)
+
+        with mock.patch.dict(os.environ, {"PATH": os.environ["PATH"]}, clear=True):
+            with mock.patch.object(subprocess, "run", side_effect=run):
+                with self.assertRaisesRegex(review.ReviewRefused, "classic"):
                     review.run_copilot(self.cfg(), self.rdir, "fixture")
 
     def test_nonzero_and_timeout_are_not_success(self):

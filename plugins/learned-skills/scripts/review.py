@@ -18,9 +18,11 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 import uuid
 
@@ -781,11 +783,72 @@ def check_copilot_root(sdir):
             raise ReviewRefused("Copilot machine policy cannot be excluded")
 
 
+def run_group(argv, *, timeout, **kwargs):
+    """subprocess.run in its own session: on a timeout, and after a normal exit, the whole process
+    group is killed, so nothing the engine forked (or an exec/spawn chain) outlives the call.
+    The engine's own exit ends the wait; a forked child still holding stdout can't stretch it."""
+    proc = subprocess.Popen(argv, start_new_session=True, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, **kwargs)
+    chunks = {proc.stdout: [], proc.stderr: []}
+    readers = [threading.Thread(target=lambda f=f: chunks[f].append(f.read()), daemon=True)
+               for f in chunks]
+    for reader in readers:
+        reader.start()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        kill_group(proc.pid)
+        proc.wait()
+        raise
+    finally:
+        kill_group(proc.pid)  # closes any pipe a straggler held, so the readers finish
+        for reader in readers:
+            reader.join(timeout=5)
+    out, err = (b"".join(chunks[f]).decode(errors="replace") for f in (proc.stdout, proc.stderr))
+    return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+
+
+def kill_group(pgid):
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def resolve_copilot_launcher(base):
+    """Resolve the launcher with the caller's PATH, before HOME is swapped. The common `gh copilot`
+    shim strips only $HOME/.local/bin from PATH and re-execs `gh copilot`; under the reviewer's
+    fresh HOME, gh misses its binary and finds the shim again, an endless gh -> gh chain."""
+    path = shutil.which(base[0])
+    if path is None:
+        raise ReviewRefused(f"Copilot launcher not found on PATH: {base[0]}")
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(65536)
+    except OSError as e:
+        raise ReviewRefused(f"Copilot launcher unreadable: {e}") from e
+    if head.startswith(b"#!") and re.search(rb"\bgh\s+copilot\b", head):
+        raise ReviewRefused(
+            f"{path} is a `gh copilot` shim, which recurses under the reviewer's private HOME; "
+            "set engine_command to the Copilot CLI binary itself "
+            "(e.g. ~/.local/share/gh/copilot/copilot)")
+    return [os.path.realpath(path), *base[1:]]
+
+
+def copilot_token_kind(token):
+    # Copilot CLI rejects classic PATs; refuse before launch with the same guidance.
+    if token.startswith("ghp_"):
+        raise ReviewRefused(
+            "Copilot CLI rejects classic personal access tokens (ghp_); use a fine-grained "
+            "token with the Copilot Requests permission, or `gh auth login` with OAuth")
+
+
 def run_copilot(cfg, sdir, prompt):
     """Private configuration, scoped native permissions and a mandatory file-tool guard."""
     sdir = os.path.realpath(sdir)
     cmd = copilot_command(cfg, sdir, prompt)
     check_copilot_root(sdir)
+    launcher = resolve_copilot_launcher(cmd[:len(cfg.get("engine_command") or ["copilot"])])
     home = os.path.join(os.path.dirname(sdir), "copilot-home")
     if os.path.islink(home):
         raise ReviewRefused("Copilot runtime home is a symlink")
@@ -804,27 +867,32 @@ def run_copilot(cfg, sdir, prompt):
     }
     with open(os.path.join(env["COPILOT_HOME"], "settings.json"), "w") as fh:
         json.dump(settings, fh)
-    base = cfg.get("engine_command") or ["copilot"]
-    help_result = subprocess.run([*base, "--no-auto-update", "--help"], capture_output=True,
-                                 text=True, stdin=subprocess.DEVNULL, cwd=sdir, env=env, timeout=30)
+    base = launcher
+    help_result = run_group([*base, "--no-auto-update", "--help"], cwd=sdir, env=env, timeout=30)
     available = set(re.findall(r"(?<!\S)(--[a-z][a-z0-9-]*)\b", help_result.stdout))
     missing = [flag for flag in COPILOT_FLAGS if flag not in available]
     if help_result.returncode or missing:
         raise ReviewRefused("Copilot confinement flags unavailable: " + ", ".join(missing))
-    version = subprocess.run([*base, "--no-auto-update", "--version"], capture_output=True,
-                             text=True, stdin=subprocess.DEVNULL, cwd=sdir, env=env, timeout=30)
+    version = run_group([*base, "--no-auto-update", "--version"], cwd=sdir, env=env, timeout=30)
     match = re.search(r"GitHub Copilot CLI (\d+)\.(\d+)\.(\d+)\b", version.stdout)
     if version.returncode or not match or tuple(map(int, match.groups())) < (1, 0, 101):
         raise ReviewRefused("Copilot CLI 1.0.101 or newer is required for the verified hook boundary")
+    if not env.get("COPILOT_PROVIDER_BASE_URL"):
+        # Copilot's own precedence: the first of these that is set is the token it uses.
+        for key in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+            if env.get(key):
+                copilot_token_kind(env[key])
+                break
     if not any(env.get(key) for key in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
                                       "COPILOT_PROVIDER_BASE_URL")):
         auth = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True,
                               stdin=subprocess.DEVNULL, timeout=30)
         if auth.returncode or not auth.stdout.strip():
             raise ReviewRefused("Copilot reviewer needs a token environment variable or gh auth login")
+        copilot_token_kind(auth.stdout.strip())
         env["COPILOT_GITHUB_TOKEN"] = auth.stdout.strip()
-    return subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                          cwd=sdir, env=env, timeout=cfg["timeout_seconds"])
+    return run_group([*launcher, *cmd[len(launcher):]], cwd=sdir, env=env,
+                     timeout=cfg["timeout_seconds"])
 
 
 def build_prompt(cfg, sdir, digest_path, work, records=None, source=None, staged=None):

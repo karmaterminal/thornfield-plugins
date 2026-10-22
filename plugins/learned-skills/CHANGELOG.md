@@ -14,6 +14,12 @@
   approvals. Reviews refuse unsupported CLI versions/flags, repository-scoped runtime
   directories and machine policy that cannot be excluded. CLI hook timeouts and session
   persistence differences are documented.
+- **Every Copilot process dies with the review.** Each Copilot call runs in its own process
+  session; on a timeout, and after the engine exits, the whole process group is killed, so
+  nothing it forked outlives the review. The launcher is resolved on the caller's PATH
+  before the private HOME is set, and a `gh copilot` shim is refused (under a private HOME
+  it re-execs itself without end); point `engine_command` at the Copilot binary. A classic
+  personal access token (`ghp_`) is refused before launch, since Copilot CLI rejects it.
 - **Optional wrapper argv.** `engine_command` is a generic executable/subcommand prefix
   for Copilot, validated without special-casing launcher names.
 - Public defaults, opt-in commits, undo, redaction, staging, filters and optional sinks

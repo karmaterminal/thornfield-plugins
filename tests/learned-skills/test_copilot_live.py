@@ -95,11 +95,12 @@ class LiveCopilot(unittest.TestCase):
             "generated-cache format mismatch, never to source fixtures."
         )
         prompt = "\n\n".join([history] * 3) + "\nAcknowledge this synthetic completed history briefly, without tools."
-        argv = ["copilot", "-p", prompt, "--model", MODEL, "--silent", "--no-auto-update",
+        # Resolve with the caller's PATH, as the reviewer does: a `gh copilot` shim is refused.
+        argv = [*review.resolve_copilot_launcher(["copilot"]), "-p", prompt, "--model", MODEL, "--silent", "--no-auto-update",
                 "--disable-builtin-mcps", "--no-custom-instructions", "--no-remote", "--no-remote-export",
                 "--disable-client-telemetry", "--trust-folder", "--plugin-dir", PLUGIN,
                 "--available-tools=view", "--usage-output-file", os.path.join(self.root, "host-usage.json")]
-        result = subprocess.run(argv, cwd=proj, env=env, capture_output=True, text=True, timeout=180)
+        result = review.run_group(argv, cwd=proj, env=env, timeout=180)
         self.receipt["host_exit"] = result.returncode
         self.receipt["host_response"] = result.stdout
         self.assertEqual(result.returncode, 0, result.stderr)
