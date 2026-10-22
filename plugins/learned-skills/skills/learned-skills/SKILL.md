@@ -2,7 +2,7 @@
 name: learned-skills
 description: >-
   Use when a "💾 Learned" notice arrives from the background skill review, when someone says undo
-  after one, when enabling or tuning learned skills in a Claude Code project
+  after one, when enabling or tuning learned skills in Claude Code or GitHub Copilot CLI
   (.claude/learned-skills.json), when a learned-* skill misled you and needs a fix, or when
   deciding whether something belongs in a learned skill, in memory, or in a shared plugin, or when
   feeding learning records to another repo (kind record, sink, filter_command). Covers how the
@@ -11,7 +11,7 @@ description: >-
 
 # learned-skills
 
-After every few turns a detached, headless `claude -p` review reads what you did since the last
+After every few turns a detached, headless `claude -p` or `copilot -p` review reads what you did since the last
 review and decides whether it taught a procedure worth keeping. If so, it creates or patches a
 `learned-*` skill in this project's skills dir, and the next prompt you get carries a
 `💾 Learned` notice. Learned skills load like any other skill: only the description, until a
@@ -31,13 +31,17 @@ Facts about people, preferences and project state are memory, not skills.
   level), and no file matches a credential shape (key headers, GitHub/Anthropic/Slack/AWS/Google/
   Discord tokens, JWTs, SSH key blobs, padded base64; the log names the rule, never the value).
   Without PyYAML the frontmatter must be bare `name:`/`description:` lines (quoted, `?` or flow
-  keys are refused). A review whose `claude` exits non-zero applies nothing. A learned skill
+  keys are refused). A review whose engine exits non-zero applies nothing. A learned skill
   edited while the review ran is left alone.
 - The review runs with no user or project settings, hooks, plugins or MCP servers, and has no
   shell or web tools. Its file reads and searches are scoped to `STATE/reviewer/`, and its edits
   and writes to `work/` and `work-records/` there. That dir holds only the redacted digest,
   copies of `context_files`, and copies of the `learned-*` skills. Other skills reach the review
   as a list of names and descriptions, never their bodies.
+  Both engines have an explicit file-tool guard. Copilot additionally isolates HOME and config
+  roots, disables custom instructions and built-in MCP servers, and refuses runtime directories
+  inside a repository or machine policy that cannot be excluded. Never weaken flags or fall
+  back to another engine after refusal. See the README for the CLI hook-timeout limitation.
 - Staging copies regular files and directories only, never following a link. A `learned-*`
   skill that is a symlink, or holds a symlink or special file at any depth, is not staged
   (`not staged NAME: ...` in the log), and a review that writes that name anyway can't apply it,
@@ -65,7 +69,7 @@ Facts about people, preferences and project state are memory, not skills.
 | `learned-skills: no .claude/learned-skills.json in ...` | Not enabled in this project, or you are not in its dir: set `CLAUDE_PROJECT_DIR` or `cd` there. |
 | `only N chars since the last review` in the log | Normal: too little new work; the turns carry over to the next review. |
 | `not applied learned-NAME: ...` or `ignored NAME` in the log | The review wrote a skill that failed a check, touched a skill that isn't its own, or raced an edit; nothing landed. |
-| `claude exit` not 0 in the log | Auth or quota; the same turns are read again next time. |
+| `claude exit` or `copilot exit` not 0 in the log | Auth or quota; the same turns are read again next time. |
 | `commit failed (index busy?)` or `not committed (MERGE_HEAD in progress)` and the like | The change is in the working tree, unstaged; commit it when the repo is free. |
 | Learnings must go to another repo (a team repo, a branch) | Set `sink` and, for friction notes rather than skills, `kind: record` (§ Records, sinks and the filter). |
 | `record not kept NAME: ...` or `withheld by filter (exit N)` in the log | A record failed its checks or the filter refused a candidate; nothing was kept. |
@@ -79,7 +83,7 @@ Facts about people, preferences and project state are memory, not skills.
   "skills_dir": ".claude/skills",
   "every_turns": 8,
   "min_interval_minutes": 20,
-  "model": "sonnet",
+  "engine": "auto",
   "commit": false,
   "context_files": ["~/.claude/projects/PROJECT/memory/MEMORY.md"]
 }
@@ -90,8 +94,18 @@ the values shown are the defaults, except `context_files` (default none): files 
 (as copies) so it does not write a skill for what memory already says. Also: `idle_seconds` (30,
 wait before reading), `max_skill_bytes` (40000), `max_digest_bytes` (200000, the newest session
 text kept), `timeout_seconds` (900), `commit_branch` (none: with `commit: true`, commit on any
-branch; set it so learned commits never land on a feature branch), `engine` (`claude`, the only
-one). Paths may start with `~`; a relative `skills_dir` is from the project root.
+branch; set it so learned commits never land on a feature branch), `engine` (`auto`, `claude`
+or `copilot`), `model` (`sonnet` for Claude or `auto` for Copilot unless explicitly set).
+`auto` follows the current transcript, not the installed executables. Both engines support
+`skill`, `record` and `both`; Copilot needs CLI 1.0.101 or newer. Optional `engine_command` is
+a nonempty executable/subcommand argv list for a trusted Copilot wrapper (no option flags,
+no special launcher names). Paths may start with `~`; a relative `skills_dir` is from the project root.
+
+Claude's commands in the table above are unchanged. In Copilot, use this skill and run the
+portable CLI from the project: `python3 PLUGIN/scripts/cli.py status`, `log`, `review-now`,
+`undo learned-NAME` or `reset-guard SESSION` (PLUGIN is this skill's plugin directory).
+Copilot notices arrive at session start or after a successful tool call, not at prompt
+submission. Do not consume a pending notice using a prompt hook whose output will be discarded.
 
 State (turn count, transcript offsets, log, pending notices, undo copies) lives in
 `~/.local/state/learned-skills/PROJECT-HASH/` (or under `$XDG_STATE_HOME`), outside the repo.
@@ -166,7 +180,7 @@ work's subject may leave the organization.
   A `BEGIN` opens a key wherever it appears. Everything after it is withheld, across messages
   and reviews, until the whole `END` line with the same label (`BEGIN RSA …` closes only at
   `END RSA …`; a nested or mismatched one is body) from the same place: the user's text,
-  Claude's, or the very tool call (by its id), so one fetched page can't end a key pasted
+  the assistant's, or the very tool call (by its id), so one fetched page can't end a key pasted
   in a user turn or opened by another tool result. A guard whose source is unknown (saved by
   0.3.2, or unreadable) closes at no `END`, only by reset. An `END` is a whole line only: text
   before or after the marker keeps the key open. In JSON (a whole block, or a JSON document
@@ -208,9 +222,13 @@ before creating; never say the same thing in both.
 
 ## Cost and limits
 
-Each review is one headless `claude -p` run on the user's own login and model quota;
+Each review is one headless Claude Code or GitHub Copilot CLI run on the user's account and quota;
 `every_turns` and `min_interval_minutes` bound how often. A review reads every transcript of the
 project it has seen (the last 50) past where it stopped, so a session that ended or was cleared
 before its review is still read. It sees main transcripts only (`isSidechain` entries are
-excluded), rendered as text with long tool output cut. It does not archive unused skills; prune
+excluded, as are Copilot child-agent events), rendered as text with long tool output cut.
+Copilot Auto can be billable; use an explicit `model` to control selection. Its private
+`STATE/copilot-home/` retains the last reviewer transcript/logs because there is no
+no-session-persistence flag; it is outside the model's file read root and replaced on the next
+Copilot review. The plugin does not archive unused skills; prune
 by hand with `/learned-skills:learned-undo` or `git rm`.

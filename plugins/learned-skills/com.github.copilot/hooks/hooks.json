@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "hooks": {
+    "agentStop": [
+      {
+        "type": "command",
+        "command": "python3 \"${COPILOT_PLUGIN_ROOT}/scripts/on_stop.py\" --copilot",
+        "timeoutSec": 10
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "command": "python3 \"${COPILOT_PLUGIN_ROOT}/scripts/on_stop.py\" --copilot --session-end",
+        "timeoutSec": 10
+      }
+    ],
+    "sessionStart": [
+      {
+        "type": "command",
+        "command": "python3 \"${COPILOT_PLUGIN_ROOT}/scripts/on_prompt.py\" --copilot",
+        "timeoutSec": 10
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "command": "python3 \"${COPILOT_PLUGIN_ROOT}/scripts/on_prompt.py\" --copilot",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

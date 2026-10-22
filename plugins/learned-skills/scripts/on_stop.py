@@ -15,22 +15,31 @@ import common  # noqa: E402
 
 def main():
     if os.environ.get("LEARNED_SKILLS_REVIEW"):  # common.GUARD_ENV, spelled out
-        return  # the review's own claude finished a turn
+        return
     try:
         hook = json.load(sys.stdin)
     except ValueError:
         return
+    if not isinstance(hook, dict) or hook.get("agent_id") or hook.get("agentId") or hook.get("stop_hook_active"):
+        return
+    if "--copilot" in sys.argv:
+        hook["engine"] = "copilot"
+    ending = "--session-end" in sys.argv
     proj = common.project_dir(hook)
     cfg = common.load_config(proj)
-    transcript = hook.get("transcript_path")
+    transcript = common.transcript_path(hook)
     if cfg is None or not transcript:
         return
     sdir = common.state_dir(proj)
     now = time.time()
     with common.locked_state(sdir) as state:
-        state["turns"] += 1
+        session = hook.get("session_id") or hook.get("sessionId")
+        if ending and state.get("session_id") == session and state.get("transcript"):
+            transcript = state["transcript"]
+        if not ending:
+            state["turns"] += 1
         state["transcript"] = transcript
-        state["session_id"] = hook.get("session_id")
+        state["session_id"] = session
         if transcript not in state["transcripts"]:
             state["transcripts"] = (state["transcripts"] + [transcript])[-50:]
         # The review resets turns and last_review only when it really runs; a review that finds
