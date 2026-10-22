@@ -280,6 +280,31 @@ class Copilot(unittest.TestCase):
                 with self.assertRaisesRegex(review.ReviewRefused, "classic"):
                     review.run_copilot(self.cfg(), self.rdir, "fixture")
 
+    def test_cli_1_0_103_retired_remote_flags_are_adapted(self):
+        # 1.0.103: --no-remote removed, --no-remote-export renamed to --sync-session off.
+        new_help = [f for f in review.COPILOT_FLAGS if f not in review.REMOTE_FLAGS] + ["--sync-session"]
+        script = open(self.fake).read().replace(
+            "print('\\n'.join(review.COPILOT_FLAGS)); sys.exit(0)",
+            f"print('\\n'.join({new_help!r})); sys.exit(0)")
+        self.assertNotEqual(script, open(self.fake).read())
+        write(self.fake, script)
+        result = review.run_copilot(self.cfg(), self.rdir, "fixture")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(os.path.join(os.path.dirname(self.rdir), "copilot-home", ".copilot", "capture.json")) as fh:
+            argv = json.load(fh)["argv"]
+        self.assertIn("--sync-session=off", argv)
+        self.assertNotIn("--no-remote", argv)
+        self.assertNotIn("--no-remote-export", argv)
+
+    def test_remote_flags_missing_without_the_new_shape_still_refuse(self):
+        old_help = [f for f in review.COPILOT_FLAGS if f != "--no-remote"]
+        script = open(self.fake).read().replace(
+            "print('\\n'.join(review.COPILOT_FLAGS)); sys.exit(0)",
+            f"print('\\n'.join({old_help!r})); sys.exit(0)")
+        write(self.fake, script)
+        with self.assertRaisesRegex(review.ReviewRefused, "--no-remote"):
+            review.run_copilot(self.cfg(), self.rdir, "fixture")
+
     def test_nonzero_and_timeout_are_not_success(self):
         result = review.run_copilot(self.cfg(), self.rdir, "nonzero")
         self.assertEqual(result.returncode, 7)

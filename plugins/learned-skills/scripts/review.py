@@ -720,6 +720,27 @@ COPILOT_FLAGS = (
 )
 
 
+REMOTE_FLAGS = ("--no-remote", "--no-remote-export")
+
+
+def remote_flags_retired(available):
+    """Copilot CLI 1.0.103 removed --no-remote and renamed --no-remote-export to --sync-session off.
+    Incoming control there is opt-in (--host-environment, --host-ahp or an interactive /remote),
+    and a review passes none of them, so the CLI has nothing left to turn off."""
+    return "--sync-session" in available and "--no-remote" not in available
+
+
+def adapt_remote_flags(cmd, available):
+    if not remote_flags_retired(available):
+        return cmd
+    out = []
+    for arg in cmd:
+        if arg == "--no-remote":
+            continue
+        out.append("--sync-session=off" if arg == "--no-remote-export" else arg)
+    return out
+
+
 def copilot_command(cfg, sdir, prompt):
     base = cfg.get("engine_command")
     base = ["copilot"] if base is None else base
@@ -870,7 +891,9 @@ def run_copilot(cfg, sdir, prompt):
     base = launcher
     help_result = run_group([*base, "--no-auto-update", "--help"], cwd=sdir, env=env, timeout=30)
     available = set(re.findall(r"(?<!\S)(--[a-z][a-z0-9-]*)\b", help_result.stdout))
-    missing = [flag for flag in COPILOT_FLAGS if flag not in available]
+    cmd = adapt_remote_flags(cmd, available)
+    missing = [flag for flag in COPILOT_FLAGS if flag not in available
+               and not (flag in REMOTE_FLAGS and remote_flags_retired(available))]
     if help_result.returncode or missing:
         raise ReviewRefused("Copilot confinement flags unavailable: " + ", ".join(missing))
     version = run_group([*base, "--no-auto-update", "--version"], cwd=sdir, env=env, timeout=30)
