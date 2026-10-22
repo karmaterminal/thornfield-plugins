@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.5.0 (2026-10-22)
+
+- **Claude Code or GitHub Copilot CLI.** `engine` accepts `claude`, `copilot` or `auto`
+  (the default, following the current session transcript). Both engines support skills,
+  learning records and combined reviews. Model defaults remain `sonnet` for Claude and
+  `auto` for Copilot. Neither engine falls back to the other.
+- **Native Copilot hooks and transcripts.** Turn and session-end hooks remember transcripts
+  and start due reviews. Notices arrive at session start or after the next successful tool,
+  because Copilot discards prompt-hook output. Claude's prompt notices are unchanged.
+- **An explicit file-tool guard on both engines.** Copilot uses an isolated runtime home,
+  no custom instructions or built-in MCP servers, a four-tool allowlist and scoped write
+  approvals. Reviews refuse unsupported CLI versions/flags, repository-scoped runtime
+  directories and machine policy that cannot be excluded. CLI hook timeouts and session
+  persistence differences are documented.
+- **Every Copilot process dies with the review.** Each Copilot call runs in its own process
+  session; on a timeout, and after the engine exits, the whole process group is killed, so
+  nothing it forked outlives the review. The launcher is resolved on the caller's PATH
+  before the private HOME is set, and a `gh copilot` shim is refused (under a private HOME
+  it re-execs itself without end); point `engine_command` at the Copilot binary. A classic
+  personal access token (`ghp_`) is refused before launch, since Copilot CLI rejects it.
+- **Copilot CLI 1.0.103.** It removed `--no-remote` and renamed `--no-remote-export` to
+  `--sync-session off`. When `--help` shows that shape, reviews pass `--sync-session=off` and
+  drop `--no-remote`: incoming control there is opt-in (`--host-environment`, `--host-ahp`,
+  an interactive `/remote`), and reviews pass none of those. Any other missing flag still refuses.
+- **Optional wrapper argv.** `engine_command` is a generic executable/subcommand prefix
+  for Copilot, validated without special-casing launcher names.
+- Public defaults, opt-in commits, undo, redaction, staging, filters and optional sinks
+  remain unchanged. New offline tests and an opt-in synthetic live proof cover the port.
+
 ## 0.4.2 (2026-10-20)
 
 For the plugin directory's checks. No behaviour change.

@@ -19,6 +19,15 @@ def main():
         hook = json.load(sys.stdin)
     except ValueError:
         hook = {}
+    if not isinstance(hook, dict):
+        return
+    copilot = "--copilot" in sys.argv
+    if not copilot and os.environ.get("COPILOT_CLI") and hook.get("hook_event_name") == "UserPromptSubmit":
+        return  # Copilot discards UserPromptSubmit output; do not consume its notices.
+    if hook.get("agent_id") or hook.get("agentId"):
+        return
+    if copilot:
+        hook["engine"] = "copilot"
     proj = common.project_dir(hook)
     cfg = common.load_config(proj)
     if cfg is None:
@@ -42,7 +51,7 @@ def main():
              + f" [{short(n.get('ref'), 60)}]" for n in notices[-10:]]
     if len(notices) > 10:
         lines.insert(0, f"({len(notices) - 10} older notices not shown; see `/learned-skills:learned-log`)")
-    print("Background skill review since your last turn (learned-skills plugin):\n"
+    text = ("Background skill review since your last turn (learned-skills plugin):\n"
           + "\n".join(lines)
           + "\nTell the people you work with, in one line each, where you would normally report work. "
             "Review: read the skill's SKILL.md. Undo: `/learned-skills:learned-undo NAME`."
@@ -50,6 +59,13 @@ def main():
              f"`{os.path.relpath(cfg['skills_dir'], proj)}/NAME` to keep it, or set \"commit\": true "
              "in .claude/learned-skills.json to have reviews commit."
              if any("not committed" in str(n.get("ref")) for n in notices[-10:]) else ""))
+    if copilot:
+        cli = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cli.py")
+        for command, args in (("learned-log", "log"), ("learned-undo NAME", "undo NAME")):
+            text = text.replace(f"/learned-skills:{command}", f'python3 "{cli}" {args}')
+        print(json.dumps({"additionalContext": text}))
+    else:
+        print(text)
 
 
 if __name__ == "__main__":

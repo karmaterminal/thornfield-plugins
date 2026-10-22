@@ -1,6 +1,6 @@
 {
   "name": "thornfield-plugins",
-  "description": "A small, curated set of general-purpose Claude Code plugins. Each one is self-contained, MIT licensed and tested in CI.",
+  "description": "A small, curated set of general-purpose plugins for Claude Code or GitHub Copilot CLI. Each one is self-contained, MIT licensed and tested in CI.",
   "owner": {
     "name": "karmaterminal"
   },
@@ -8,8 +8,8 @@
     {
       "name": "learned-skills",
       "source": "./plugins/learned-skills",
-      "description": "Turns repeated work into reviewable skills. Every few turns a Stop hook starts a background claude -p review of the session transcript (credentials redacted, on your own account), which may create or patch learned-* skills in the project's .claude/skills, with a Learned notice and one-command undo. Off until a project opts in with .claude/learned-skills.json. Optional learning records, a git sink and a disclosure filter for teams.",
-      "version": "0.4.2",
+      "description": "Turns work in Claude Code or GitHub Copilot CLI into reviewable learned-* skills or learning records. Opt-in hooks start a confined background review of redacted session transcripts on your own account, with staged file tools, a Learned notice and one-command undo. Off until .claude/learned-skills.json exists. Commits, a git sink and a disclosure filter are optional.",
+      "version": "0.5.0",
       "license": "MIT",
       "category": "productivity",
       "homepage": "https://github.com/karmaterminal/thornfield-plugins/tree/main/plugins/learned-skills",

@@ -48,6 +48,7 @@ def status(proj):
     sdir = common.state_dir(proj)
     st = common.load_state(sdir)
     print(f"project     {proj}\nskills dir  {cfg['skills_dir']}\nstate dir   {sdir}")
+    print(f"engine      {cfg['engine']}\nmodel       {cfg['model'] or '(engine default)'}")
     last = st.get("last_review") or 0
     print(f"next review after {max(cfg['every_turns'] - st.get('turns', 0), 0)} more turn(s)"
           f" and not before {time.strftime('%H:%M', time.localtime(last + cfg['min_interval_minutes'] * 60))}"

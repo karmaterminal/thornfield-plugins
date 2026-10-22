@@ -5,7 +5,7 @@ review-now`. Usage: review.py PROJECT_DIR [--now]. Reads every known transcript 
 (state.json `transcripts`) past its saved offset, so turns from an ended or replaced session are
 not lost.
 
-Fail-closed: the reviewer gets no MCP servers, no shell, no web. Claude runs in STATE/reviewer/,
+Fail-closed: the reviewer gets no MCP servers, no shell, no web. The engine runs in STATE/reviewer/,
 which holds the redacted digest, context copies and plain copies of the learned-* skills only,
 and edits the staged skills there. After it exits, only learned-* skill dirs that pass the checks
 below are copied into the project; every other change is dropped.
@@ -16,10 +16,13 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 import uuid
 
@@ -312,10 +315,37 @@ def digest(transcript, offset, cap, guard=None):
             continue
         if not isinstance(e, dict):
             continue
-        if e.get("isSidechain") or e.get("type") not in ("user", "assistant"):
+        if e.get("isSidechain") or e.get("agentId") or e.get("agent_id"):
+            continue
+        kind, payload = e.get("type"), e.get("data")
+        if isinstance(payload, dict):
+            if payload.get("agentId") or payload.get("agent_id") or payload.get("parentToolCallId"):
+                continue
+            if kind in ("user.message", "assistant.message"):
+                lines.extend(render_blocks(kind.split(".")[0], payload.get("content"), guard))
+                continue
+            if kind == "tool.execution_start":
+                lines.extend(render_blocks("assistant", [{
+                    "type": "tool_use", "name": payload.get("toolName"),
+                    "input": payload.get("arguments"), "id": payload.get("toolCallId"),
+                }], guard))
+                continue
+            if kind == "tool.execution_complete":
+                result = payload.get("result") if payload.get("success") else payload.get("error")
+                # Render strings directly so a split private key retains its own line breaks.
+                if isinstance(result, dict):
+                    result = result.get("content", result.get("message", result))
+                lines.extend(render_blocks("user", [{
+                    "type": "tool_result",
+                    "content": result if isinstance(result, str) else json.dumps(result, ensure_ascii=False),
+                    "is_error": not payload.get("success"), "tool_use_id": payload.get("toolCallId"),
+                }], guard))
+                continue
+        if kind not in ("user", "assistant"):
             continue
         msg = e.get("message") or {}
-        lines.extend(render_blocks(msg.get("role", e["type"]), msg.get("content"), guard))
+        if isinstance(msg, dict):
+            lines.extend(render_blocks(msg.get("role", e["type"]), msg.get("content"), guard))
     text = "\n".join(lines)
     if len(text) > cap:
         text = "[earlier turns cut]\n" + text[-cap:]
@@ -620,17 +650,272 @@ def run_claude(cfg, sdir, prompt):
         json.dump({"mcpServers": {}}, fh)
     here = "/" + sdir.rstrip("/")
     work, records = "/" + os.path.join(sdir, "work"), "/" + os.path.join(sdir, "work-records")
-    cmd = ["claude", "-p", "--model", cfg["model"], "--strict-mcp-config", "--mcp-config", mcp,
-           "--setting-sources", "", "--no-session-persistence", "--permission-mode", "default",
+    cmd = ["claude", "-p", "--model", cfg["model"] or "sonnet", "--strict-mcp-config", "--mcp-config", mcp,
+           "--setting-sources", "", "--no-session-persistence", "--permission-mode", "dontAsk",
            # Only these five tools exist in the run (no Bash, web, agents, cron, messaging), and
            # each is scoped: Edit(...) rules also govern Write.
            "--tools", "Read,Glob,Grep,Edit,Write",
            "--allowedTools", f"Read({here}/**)", f"Glob({here}/**)", f"Grep({here}/**)",
            f"Edit({work}/**)", f"Edit({records}/**)"]
+    guard = shlex.join([sys.executable, os.path.join(HERE, "reviewer_permissions.py"), os.path.realpath(sdir)])
+    cmd += ["--settings", json.dumps({"hooks": {"PreToolUse": [{
+        "matcher": "*", "hooks": [{"type": "command", "command": guard, "timeout": 10}],
+    }]}})]
     env = dict(os.environ, **{common.GUARD_ENV: "1"})
     env.pop("CLAUDE_PROJECT_DIR", None)
     return subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=sdir, env=env,
                           timeout=cfg["timeout_seconds"])
+
+
+class ReviewRefused(Exception):
+    """The requested review cannot meet the confinement contract."""
+
+
+def transcript_engine(path):
+    with open(path, "rb") as fh:
+        for raw in fh:
+            if not raw.endswith(b"\n"):
+                break
+            try:
+                event = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            if event.get("type") == "session.start":
+                data = event.get("data")
+                if isinstance(data, dict) and data.get("producer") == "copilot-agent":
+                    return "copilot"
+                raise ReviewRefused("unsupported transcript producer")
+            if event.get("type") in ("user", "assistant") and isinstance(event.get("message"), dict):
+                return "claude"
+            if event.get("type") in ("user.message", "assistant.message"):
+                return "copilot"
+    raise ReviewRefused("auto needs a complete, recognizable session transcript")
+
+
+def select_engine(cfg, state):
+    engine = cfg["engine"]
+    if engine == "auto":
+        path = state.get("transcript")
+        if not path or not os.path.isfile(path):
+            known = [t for t in state["transcripts"] if os.path.isfile(t)]
+            if not known:
+                raise ReviewRefused("auto needs a known session transcript")
+            path = max(known, key=os.path.getmtime)
+        engine = transcript_engine(path)
+    if engine not in ("claude", "copilot"):
+        raise ReviewRefused("engine must be claude, copilot or auto")
+    if cfg["kind"] not in ("skill", "record", "both"):
+        raise ReviewRefused("kind must be skill, record or both")
+    return dict(cfg, engine=engine, model=cfg["model"] or ("sonnet" if engine == "claude" else "auto"))
+
+
+COPILOT_FLAGS = (
+    "--model", "--silent", "--no-custom-instructions", "--disable-builtin-mcps",
+    "--no-ask-user", "--disallow-temp-dir", "--no-auto-update", "--no-remote",
+    "--no-remote-export", "--available-tools", "--allow-tool", "--deny-tool",
+    "--no-experimental", "--disable-client-telemetry",
+    "--usage-output-file",
+)
+
+
+REMOTE_FLAGS = ("--no-remote", "--no-remote-export")
+
+
+def remote_flags_retired(available):
+    """Copilot CLI 1.0.103 removed --no-remote and renamed --no-remote-export to --sync-session off.
+    Incoming control there is opt-in (--host-environment, --host-ahp or an interactive /remote),
+    and a review passes none of them, so the CLI has nothing left to turn off."""
+    return "--sync-session" in available and "--no-remote" not in available
+
+
+def adapt_remote_flags(cmd, available):
+    if not remote_flags_retired(available):
+        return cmd
+    out = []
+    for arg in cmd:
+        if arg == "--no-remote":
+            continue
+        out.append("--sync-session=off" if arg == "--no-remote-export" else arg)
+    return out
+
+
+def copilot_command(cfg, sdir, prompt):
+    base = cfg.get("engine_command")
+    base = ["copilot"] if base is None else base
+    if not (isinstance(base, list) and base and all(
+            isinstance(arg, str) and arg.strip() and not any(c in arg for c in "\0\r\n")
+            and not arg.startswith("-") for arg in base)):
+        raise ReviewRefused("engine_command must be a nonempty executable argv prefix without CLI flags")
+    if any(c in sdir for c in "*?[](){}\\"):
+        raise ReviewRefused("reviewer path contains permission-pattern metacharacters")
+    return [*base, "-p", prompt, "--model", cfg["model"] or "auto", "--silent",
+            "--no-custom-instructions", "--disable-builtin-mcps", "--no-ask-user",
+            "--disallow-temp-dir", "--no-auto-update", "--no-remote", "--no-remote-export",
+            "--no-experimental", "--disable-client-telemetry",
+            "--available-tools=view,glob,rg,apply_patch", "--deny-tool=shell", "--deny-tool=url",
+            f"--allow-tool=write({os.path.join(sdir, 'work')})",
+            f"--allow-tool=write({os.path.join(sdir, 'work-records')})"]
+
+
+def copilot_env(home):
+    keep = {
+        "PATH", "LANG", "LC_ALL", "SYSTEMROOT",
+        "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "COPILOT_GH_HOST",
+        "COPILOT_PROVIDER_BASE_URL", "COPILOT_PROVIDER_TYPE", "COPILOT_PROVIDER_API_KEY",
+        "COPILOT_PROVIDER_BEARER_TOKEN", "COPILOT_PROVIDER_MODEL_ID", "COPILOT_PROVIDER_WIRE_MODEL",
+        "COPILOT_PROVIDER_WIRE_API", "COPILOT_PROVIDER_AZURE_API_VERSION",
+        "COPILOT_PROVIDER_TRANSPORT", "COPILOT_PROVIDER_HEADERS",
+        "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
+        "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+    }
+    env = {key: value for key, value in os.environ.items() if key in keep}
+    env.update({
+        "HOME": home, "USERPROFILE": home, "COPILOT_HOME": os.path.join(home, ".copilot"),
+        "XDG_CONFIG_HOME": os.path.join(home, "config"), "XDG_STATE_HOME": os.path.join(home, "state"),
+        "XDG_DATA_HOME": os.path.join(home, "data"), "XDG_CACHE_HOME": os.path.join(home, "cache"),
+        "TMPDIR": os.path.join(home, "tmp"), "COPILOT_ALLOW_ALL": "false",
+        "COPILOT_AUTO_UPDATE": "false", common.GUARD_ENV: "1",
+    })
+    for key in ("COPILOT_HOME", "TMPDIR"):
+        os.makedirs(env[key], mode=0o700)
+    return env
+
+
+def check_copilot_root(sdir):
+    # Copilot has no --setting-sources equivalent. Never admit repository configuration.
+    current = sdir
+    while True:
+        if os.path.lexists(os.path.join(current, ".git")):
+            raise ReviewRefused("Copilot reviewer directory is inside a git repository")
+        if current == os.path.dirname(current):
+            break
+        current = os.path.dirname(current)
+    if any(os.path.lexists(os.path.join(sdir, name)) for name in (".github", ".claude", ".mcp.json")):
+        raise ReviewRefused("Copilot reviewer directory contains project configuration")
+    policy = "/etc/github-copilot/policy.d"
+    if os.path.exists(policy) and any(name.endswith(".json") for name in os.listdir(policy)):
+        raise ReviewRefused("Copilot machine policy cannot be excluded")
+    for path in ("/etc/github-copilot/managed-settings.json",
+                 "/Library/Application Support/GitHubCopilot/managed-settings.json",
+                 "/Library/Managed Preferences/com.github.copilot.plist"):
+        if os.path.lexists(path):
+            raise ReviewRefused("Copilot machine policy cannot be excluded")
+
+
+def run_group(argv, *, timeout, **kwargs):
+    """subprocess.run in its own session: on a timeout, and after a normal exit, the whole process
+    group is killed, so nothing the engine forked (or an exec/spawn chain) outlives the call.
+    The engine's own exit ends the wait; a forked child still holding stdout can't stretch it."""
+    proc = subprocess.Popen(argv, start_new_session=True, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, **kwargs)
+    chunks = {proc.stdout: [], proc.stderr: []}
+    readers = [threading.Thread(target=lambda f=f: chunks[f].append(f.read()), daemon=True)
+               for f in chunks]
+    for reader in readers:
+        reader.start()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        kill_group(proc.pid)
+        proc.wait()
+        raise
+    finally:
+        kill_group(proc.pid)  # closes any pipe a straggler held, so the readers finish
+        for reader in readers:
+            reader.join(timeout=5)
+    out, err = (b"".join(chunks[f]).decode(errors="replace") for f in (proc.stdout, proc.stderr))
+    return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+
+
+def kill_group(pgid):
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def resolve_copilot_launcher(base):
+    """Resolve the launcher with the caller's PATH, before HOME is swapped. The common `gh copilot`
+    shim strips only $HOME/.local/bin from PATH and re-execs `gh copilot`; under the reviewer's
+    fresh HOME, gh misses its binary and finds the shim again, an endless gh -> gh chain."""
+    path = shutil.which(base[0])
+    if path is None:
+        raise ReviewRefused(f"Copilot launcher not found on PATH: {base[0]}")
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(65536)
+    except OSError as e:
+        raise ReviewRefused(f"Copilot launcher unreadable: {e}") from e
+    if head.startswith(b"#!") and re.search(rb"\bgh\s+copilot\b", head):
+        raise ReviewRefused(
+            f"{path} is a `gh copilot` shim, which recurses under the reviewer's private HOME; "
+            "set engine_command to the Copilot CLI binary itself "
+            "(e.g. ~/.local/share/gh/copilot/copilot)")
+    return [os.path.realpath(path), *base[1:]]
+
+
+def copilot_token_kind(token):
+    # Copilot CLI rejects classic PATs; refuse before launch with the same guidance.
+    if token.startswith("ghp_"):
+        raise ReviewRefused(
+            "Copilot CLI rejects classic personal access tokens (ghp_); use a fine-grained "
+            "token with the Copilot Requests permission, or `gh auth login` with OAuth")
+
+
+def run_copilot(cfg, sdir, prompt):
+    """Private configuration, scoped native permissions and a mandatory file-tool guard."""
+    sdir = os.path.realpath(sdir)
+    cmd = copilot_command(cfg, sdir, prompt)
+    check_copilot_root(sdir)
+    launcher = resolve_copilot_launcher(cmd[:len(cfg.get("engine_command") or ["copilot"])])
+    home = os.path.join(os.path.dirname(sdir), "copilot-home")
+    if os.path.islink(home):
+        raise ReviewRefused("Copilot runtime home is a symlink")
+    if os.path.exists(home):
+        shutil.rmtree(home)
+    os.makedirs(home, mode=0o700)
+    env = copilot_env(home)
+    cmd += ["--usage-output-file", os.path.join(home, "usage.json")]
+    settings = {
+        "autoUpdate": False, "ide": {"autoConnect": False}, "memory": False,
+        "hooks": {"preToolUse": [{
+            "type": "command", "exec": sys.executable,
+            "args": [os.path.join(HERE, "reviewer_permissions.py"), sdir, "copilot"],
+            "timeoutSec": 10,
+        }]},
+    }
+    with open(os.path.join(env["COPILOT_HOME"], "settings.json"), "w") as fh:
+        json.dump(settings, fh)
+    base = launcher
+    help_result = run_group([*base, "--no-auto-update", "--help"], cwd=sdir, env=env, timeout=30)
+    available = set(re.findall(r"(?<!\S)(--[a-z][a-z0-9-]*)\b", help_result.stdout))
+    cmd = adapt_remote_flags(cmd, available)
+    missing = [flag for flag in COPILOT_FLAGS if flag not in available
+               and not (flag in REMOTE_FLAGS and remote_flags_retired(available))]
+    if help_result.returncode or missing:
+        raise ReviewRefused("Copilot confinement flags unavailable: " + ", ".join(missing))
+    version = run_group([*base, "--no-auto-update", "--version"], cwd=sdir, env=env, timeout=30)
+    match = re.search(r"GitHub Copilot CLI (\d+)\.(\d+)\.(\d+)\b", version.stdout)
+    if version.returncode or not match or tuple(map(int, match.groups())) < (1, 0, 101):
+        raise ReviewRefused("Copilot CLI 1.0.101 or newer is required for the verified hook boundary")
+    if not env.get("COPILOT_PROVIDER_BASE_URL"):
+        # Copilot's own precedence: the first of these that is set is the token it uses.
+        for key in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+            if env.get(key):
+                copilot_token_kind(env[key])
+                break
+    if not any(env.get(key) for key in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
+                                      "COPILOT_PROVIDER_BASE_URL")):
+        auth = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, timeout=30)
+        if auth.returncode or not auth.stdout.strip():
+            raise ReviewRefused("Copilot reviewer needs a token environment variable or gh auth login")
+        copilot_token_kind(auth.stdout.strip())
+        env["COPILOT_GITHUB_TOKEN"] = auth.stdout.strip()
+    return run_group([*launcher, *cmd[len(launcher):]], cwd=sdir, env=env,
+                     timeout=cfg["timeout_seconds"])
 
 
 def build_prompt(cfg, sdir, digest_path, work, records=None, source=None, staged=None):
@@ -670,6 +955,10 @@ def build_prompt(cfg, sdir, digest_path, work, records=None, source=None, staged
 
 
 def label(transcript):
+    if os.path.basename(transcript) == "events.jsonl":
+        session = os.path.basename(os.path.dirname(transcript))
+        if common.SESSION_ID.fullmatch(session):
+            return session
     return os.path.splitext(os.path.basename(transcript))[0]
 
 
@@ -738,10 +1027,12 @@ def main():
         return
     if not now:
         time.sleep(cfg["idle_seconds"])  # let the session settle before reading its turns
-    if cfg["engine"] != "claude":
-        log(f"review refused: engine must be claude, not {cfg['engine']!r}; nothing applied")
-        return
     state = common.load_state(sdir)
+    try:
+        cfg = select_engine(cfg, state)
+    except (ReviewRefused, OSError) as error:
+        log(f"review refused: {error}; nothing applied")
+        return
     new_guards, new_idents = {}, {}
     text, new_offsets = gather(state, cfg["max_digest_bytes"], new_guards, new_idents)
     # Each block was redacted before any clip or cut (shown); this pass catches a shape that
@@ -762,7 +1053,7 @@ def main():
     with os.fdopen(os.open(digest_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as fh:
         fh.write(text)
     os.chmod(digest_path, 0o600)  # O_CREAT's mode applies only to a new file
-    # Claude edits staged skills inside its cwd, not a project's sensitive .claude/ tree.
+    # The engine edits staged skills inside its cwd, never the project's settings tree.
     before, work = os.path.join(sdir, "before"), os.path.join(rdir, "work")
     records = os.path.join(rdir, "work-records")
     # The skills the review starts from: the project's, or with live: false the sink's own
@@ -791,8 +1082,9 @@ def main():
         if bad:  # never expected: the staging above copies plain files only
             log(f"review refused: {len(bad)} symlink(s) or special file(s) in the reviewer dir; nothing applied")
             return
-        res = run_claude(cfg, rdir, prompt)
-    except OSError as e:
+        runner = run_claude if cfg["engine"] == "claude" else run_copilot
+        res = runner(cfg, rdir, prompt)
+    except (OSError, ReviewRefused) as e:
         log(f"review refused: {e}; nothing applied; the same turns are read next time")
         return
     except subprocess.TimeoutExpired:

@@ -1,7 +1,7 @@
 {
   "name": "learned-skills",
-  "version": "0.4.2",
-  "description": "Turns repeated work into reviewable skills. Every few turns a Stop hook starts a background claude -p review of the session transcript (credentials redacted, on your own account), which may create or patch learned-* skills in the project's .claude/skills, with a Learned notice and one-command undo. Off until a project opts in with .claude/learned-skills.json. Optional learning records, a git sink and a disclosure filter for teams.",
+  "version": "0.5.0",
+  "description": "Turns work in Claude Code or GitHub Copilot CLI into reviewable learned-* skills or learning records. Opt-in hooks start a confined background review of redacted session transcripts on your own account, with staged file tools, a Learned notice and one-command undo. Off until .claude/learned-skills.json exists. Commits, a git sink and a disclosure filter are optional.",
   "icon": ".claude-plugin/icon.png",
   "author": {
     "name": "karmaterminal"

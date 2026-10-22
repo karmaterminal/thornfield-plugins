@@ -1,6 +1,6 @@
 # thornfield-plugins
 
-A small, curated Claude Code plugin marketplace. Each plugin here is general-purpose,
+A small, curated plugin marketplace for Claude Code or GitHub Copilot CLI. Each plugin is general-purpose,
 self-contained, MIT licensed, and tested in CI on every change.
 
 ## Add the marketplace
@@ -13,11 +13,18 @@ In Claude Code:
 
 Then install a plugin by name, for example `/plugin install learned-skills@thornfield-plugins`.
 
+In GitHub Copilot CLI:
+
+```sh
+copilot plugin marketplace add karmaterminal/thornfield-plugins
+copilot plugin install learned-skills@thornfield-plugins
+```
+
 ## Plugins
 
 | Plugin | What it does |
 | --- | --- |
-| [learned-skills](plugins/learned-skills/) | Turns repeated work into reviewable skills: a background review of the session writes or patches `learned-*` skills in the project, with a notice and one-command undo. Opt-in per project. Read its README for what it sends to a `claude -p` run. |
+| [learned-skills](plugins/learned-skills/) | Turns repeated work into reviewable skills using Claude Code or GitHub Copilot CLI, with a confined background review, a notice and one-command undo. Opt-in per project. Read its README for data and cost disclosures. |
 | [causal-bug-proof](plugins/causal-bug-proof/) | Proves a bug's cause instead of guessing it: a fossil test that fails today, a traced code path and history, the smallest fix, and a revert that brings the failure back. Instructions only: no hooks, servers or background runs. |
 
 ## Contributing

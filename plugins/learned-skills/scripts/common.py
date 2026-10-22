@@ -9,13 +9,15 @@ import re
 CONFIG_NAME = os.path.join(".claude", "learned-skills.json")
 PREFIX = "learned-"
 GUARD_ENV = "LEARNED_SKILLS_REVIEW"
+SESSION_ID = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
 DEFAULTS = {
     "skills_dir": os.path.join(".claude", "skills"),
     "every_turns": 8,
     "min_interval_minutes": 20,
     "idle_seconds": 30,
-    "engine": "claude",
-    "model": "sonnet",
+    "engine": "auto",
+    "engine_command": None,
+    "model": None,
     "max_skill_bytes": 40_000,
     "max_digest_bytes": 200_000,
     "timeout_seconds": 900,
@@ -35,6 +37,8 @@ DEFAULTS = {
 
 def project_dir(hook_input=None):
     """The project root, symlinks resolved (git's toplevel is a real path, and so is the state key)."""
+    if hook_input and copilot_hook(hook_input) and hook_input.get("cwd"):
+        return os.path.realpath(hook_input["cwd"])
     if os.environ.get("CLAUDE_PROJECT_DIR"):
         return os.path.realpath(os.environ["CLAUDE_PROJECT_DIR"])
     if hook_input and hook_input.get("cwd"):
@@ -64,6 +68,9 @@ def load_config(proj):
         return os.path.realpath(os.path.join(root, os.path.expanduser(p)))
     cfg["skills_dir"] = at(cfg["skills_dir"], proj)
     cfg["context_files"] = [at(p, base) for p in cfg["context_files"]]
+    ec = cfg.get("engine_command")
+    if isinstance(ec, list) and ec and isinstance(ec[0], str) and ("/" in ec[0] or ec[0].startswith("~")):
+        cfg["engine_command"] = [at(ec[0], base), *ec[1:]]
     fc = cfg.get("filter_command")
     if fc:
         fc = [fc] if isinstance(fc, str) else list(fc)
@@ -78,6 +85,21 @@ def load_config(proj):
         cfg["sink"] = sk
     cfg["config_path"] = path
     return cfg
+
+
+def copilot_hook(hook):
+    return hook.get("engine") == "copilot" or "sessionId" in hook
+
+
+def transcript_path(hook):
+    path = hook.get("transcript_path") or hook.get("transcriptPath")
+    if path:
+        return path
+    session = hook.get("sessionId") or hook.get("session_id")
+    if copilot_hook(hook) and isinstance(session, str) and SESSION_ID.fullmatch(session):
+        home = os.environ.get("COPILOT_HOME") or os.path.expanduser("~/.copilot")
+        return os.path.join(home, "session-state", session, "events.jsonl")
+    return None
 
 
 def state_dir(proj):
