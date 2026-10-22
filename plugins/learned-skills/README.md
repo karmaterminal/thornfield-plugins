@@ -187,7 +187,7 @@ or a different engine after a refusal or launch failure.
 | Independent path guard | Explicit `--settings` PreToolUse command | Private `settings.json` native `preToolUse` executable hook |
 | No MCP | Empty `--mcp-config` with `--strict-mcp-config` | Fresh config home, no project config, `--disable-builtin-mcps` |
 | No user/project settings, hooks or plugins | `--setting-sources ""` | Fresh `HOME`, `COPILOT_HOME` and XDG roots; refuse a reviewer cwd inside a git repo or containing project config |
-| No custom instructions | Reviewer cwd is outside the project | `--no-custom-instructions` |
+| Instruction loading | Reviewer cwd is normally outside the project; file-tool guard remains authoritative | `--no-custom-instructions` |
 | No prompts or privilege escalation | `--permission-mode dontAsk` | Noninteractive, `--no-ask-user`, no allow-all flags, inherited approvals removed |
 
 Copilot has no `--setting-sources` switch. Its replacement is isolation, not a promise to
