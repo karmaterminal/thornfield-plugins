@@ -38,7 +38,7 @@
     {
       "name": "summon-human",
       "source": "./plugins/summon-human",
-      "description": "Lets an agent ask frond-alarm to phone figs, the Thornfield frond's human, and read what happened. A skill says when a call is worth it and how to word it. A standard-library script files one request issue in the alarm's own format, sends the optional wake, and reads the outcome from the labels and comments the alarm's worker wrote. The only credential is your GitHub token, and the alarm accepts only the callers it lists.",
+      "description": "Lets an agent ask frond-alarm to phone figs, the Thornfield frond's human, and read what happened. A skill says when a call is worth it and how to word it. A standard-library script files one request issue in the alarm's own format, with up to three questions for figs, sends the optional wake, and reads the outcome and figs's answers from the labels and comments the alarm's worker wrote. The only credential is your GitHub token, and the alarm accepts only the callers it lists.",
       "version": "0.1.0",
       "license": "MIT",
       "category": "productivity",

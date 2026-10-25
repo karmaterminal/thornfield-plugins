@@ -8,12 +8,12 @@ places a call itself and holds no provider keys.
 
 ```text
 agent -> summon.py submit -> [call] issue + wake -> frond-alarm worker -> phone call to figs
-agent <- summon.py status <- the worker's labels and comments (answered, not-answered, uncertain, ...)
+agent <- summon.py status <- the worker's labels and comments (answered, not-answered, ..., figs's answers)
 ```
 
 Summoning is the last rung: after the room, after the princes, for things that can't wait. The
-skill says when a call is worth it, how to word the 240 characters the call speaks, and how to read
-each outcome without overclaiming it.
+skill says when a call is worth it, how to word the 240 characters the call speaks and up to 3
+questions it asks figs, and how to read each outcome and answer without overclaiming it.
 
 ## What it contains, runs and sends
 
@@ -23,11 +23,13 @@ each outcome without overclaiming it.
   alarm's repository. It files nothing.
 - `summon.py submit "TEXT"` files one issue in the alarm's repository: the title
   `[call] REQUEST_ID`, the label `call-request`, and a body holding the `frond-call-v1` marker and
-  JSON with your request. The body is byte for byte what the alarm's own `submit.sh` writes. Then
-  it sends a `frond-call` repository dispatch, which only wakes the worker sooner.
+  JSON with your request, and with `--ask`, up to 3 questions for figs. The body is byte for byte
+  what the alarm's own `submit.sh` writes. Then it sends a `frond-call` repository dispatch, which
+  only wakes the worker sooner.
 - `summon.py status` reads that issue, its comments and its label history, and reports the
-  outcome from what the worker (`github-actions[bot]`) wrote. Comments from anyone else are
-  counted but never shown or read as the outcome.
+  outcome, and figs's answers once the alarm posts them, from what the worker
+  (`github-actions[bot]`) wrote. Comments from anyone else are counted but never shown or read as
+  the outcome or as answers.
 
 Everything goes to `api.github.com` under your own token, and nowhere else. The alarm's
 repository is public, so the text of a request is public too.
@@ -78,6 +80,7 @@ Ask in your own words. The skill loads when the request fits, or you can name it
 - "The build host is off the network and nothing we try brings it back. Summon figs to power cycle
   it."
 - "Do a dry run of the summon-human setup, so we know the alarm would reach figs."
+- "Phone figs and ask whether to restart the build host now or wait for the morning."
 - "Did figs answer the call from request 42? Tell me exactly what the alarm recorded."
 
 ## Where it works
@@ -92,8 +95,9 @@ command for someone else to run.
   can be held by its cooldown or hourly cap.
 - It can't prove the phone rang. `answered` means a human turn, not a voicemail system, is in the
   call's transcript, which is the alarm's evidence, not the phone company's.
-- It doesn't yet ask figs questions on the call. When the alarm adds them
-  (karmaterminal/frond-alarm#24), `status` already shows the worker's `answers:` comment.
+- Answers aren't a transcript. They are what the alarm's voice provider made of figs's words
+  through speech recognition and its call analysis, which can arrive up to 24 hours late or never,
+  and the alarm posts them on the public issue.
 
 ## Privacy
 

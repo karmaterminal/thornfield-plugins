@@ -4,18 +4,18 @@ description: >-
   Use when an agent needs figs, the frond's human, to act now and only a phone call will reach
   figs in time: a seat or host needs hands-on recovery, an outage waits on a decision only figs
   can make, or figs asked to be called when something happens. Triggers include "call figs",
-  "phone figs", "wake figs up", "summon the human", "page figs", "ring the alarm" and
-  "frond-alarm". Files one short request with frond-alarm, which phones figs, then reads the
-  outcome (answered, not-answered, uncertain, failed, dry-run, rejected) from the alarm's own
-  labels and comments. Prevents calls for noise, text the alarm refuses or can't speak, private
-  details on a public issue, two calls for one event, and reading an accepted or uncertain call
-  as answered.
+  "phone figs", "wake figs up", "summon the human", "page figs", "ask figs on the phone", "ring
+  the alarm" and "frond-alarm". Files one short request with frond-alarm, which phones figs and
+  can ask up to 3 questions, then reads the outcome (answered, not-answered, uncertain, failed,
+  dry-run, rejected) and figs's answers from the alarm's own labels and comments. Prevents calls
+  for noise, text the alarm refuses or can't speak, private details on a public issue, two calls
+  for one event, and reading an accepted or uncertain call as answered.
 metadata: {"openclaw": {"requires": {"bins": ["python3"]}}}
 ---
 
 # summon-human
 
-> Source: native here (thornfield-plugins#12, 2026-10-25) · the request format and the outcomes belong to karmaterminal/frond-alarm@4c07904 (`submit.sh`, `validate.py`, `dial.py`), which stays authoritative; re-check on drift.
+> Source: native here (thornfield-plugins#12, 2026-10-25) · the request format and the outcomes belong to karmaterminal/frond-alarm@f78d794 (`submit.sh`, `validate.py`, `dial.py`), which stays authoritative; re-check on drift.
 
 > **Paths:** `{baseDir}` is this skill's folder, the one holding this `SKILL.md` (`${CLAUDE_PLUGIN_ROOT}/skills/summon-human` in Claude Code).
 
@@ -40,9 +40,10 @@ alarm decides, rate-limits and dials. Summoning is the last rung, after the room
 
 ## Hard rules
 
-- **The words are public before they are spoken.** The request is an issue on a public
+- **The words are public before they are spoken, and figs's answers are public after.** The
+  request, its questions and the answers the alarm posts back are on an issue in a public
   repository. Never put a secret, a credential, a phone number, an address, a host's address or
-  anything private in the text.
+  anything private in the text or a question, and never ask figs for one.
 - **One request at a time.** `submit` refuses while you have an open live request; read that one
   with `status`. Pass `--allow-pending` only for a different event.
 - **Never refile an `uncertain` or `outcome-unknown` call for the same thing.** It may have rung.
@@ -58,6 +59,7 @@ alarm decides, rate-limits and dials. Summoning is the last rung, after the room
 | --- | --- |
 | Know whether you can summon at all | § Check |
 | Write what the call will say | § The text |
+| Ask figs something on the call | § Questions |
 | Summon | § Submit |
 | Know what happened | § Read the outcome |
 | Understand an error line | § Refusals and errors |
@@ -78,12 +80,24 @@ alarm's `princes.json`), and whether you can label issues there: GitHub silently
 - At most 240 characters, of letters, digits, spaces and `. , ; : ! ? ' ( ) / -`. Nothing else:
   no markup, newlines, `#`, `@`, `&`, double quotes or emoji. The alarm rejects them rather than
   rewriting them.
-- The call says your caller name and "says:", then your text. Don't open with your name.
+- The call opens with "Hello figs, this is" and the name the alarm's `princes.json` gives you,
+  says your text, then asks figs to press 1 or say okay. Don't open with a greeting or your name.
 - What you need from figs first, then why, then how soon. Plain words that read well aloud: no
   links, ids or paths.
 - Examples:
   - `Need hands on the build host: it is off the network and the frond cannot bring it back. Please power cycle it.`
   - `A bot token leaked in a public log and only you can revoke it. Please revoke it now; the princes have stopped the bot.`
+
+## Questions
+
+`--ask "QUESTION"`, up to 3 times, asks figs on the call. The call asks them one at a time after
+your text, and confirms each answer.
+
+- At most 120 characters each, of the same characters as the text.
+- One thing per question, answerable in a few words: yes or no, a time, one of two choices.
+  `Restart the build host now, or wait for the morning?` works; `What should we do?` doesn't.
+- Ask only what changes what you do next. Without questions, the call only alerts.
+- Never ask for a password, a code or anything private: the answer is posted on the public issue.
 
 ## Submit
 
@@ -93,6 +107,7 @@ python3 {baseDir}/scripts/summon.py submit "TEXT"
 
 | Option | What it does |
 | --- | --- |
+| `--ask QUESTION` | A question for figs, asked on the call (§ Questions). Up to 3 |
 | `--dry-run` | The alarm validates, dedupes and queues it, then places no call. Use it to test |
 | `--request-id ID` | Your own id, 6 to 80 of letters, digits and `. _ : -`. Default: a new UUID. Reuse an id only to look a request up, never to file twice |
 | `--line CODE` | One of the alarm's line codes (its README lists them). Default: the alarm's default line |
@@ -131,9 +146,22 @@ run it in the background. A call usually ends within 3 minutes of `accepted`.
 | `closed-without-outcome` | Someone closed it before the alarm recorded an outcome | Treat it as unknown |
 | `not-queued` | No `call-request` label, so the alarm never sees it | File from an account that can label issues there |
 
-Answers: once the alarm asks figs questions on the call (karmaterminal/frond-alarm#24), its
-`answers:` comment shows under `answers`. They are figs's words after speech recognition and
-extraction, so they can be misheard: quote them as heard, and say so, when you act on them.
+With questions, `status` also prints an `answers:` line, and the worker's answers comment once it
+is posted. `(no answer)` there means figs gave none to that question.
+
+| Answers | What it means | Do next |
+| --- | --- | --- |
+| `waiting` | The call hasn't ended | Wait |
+| `received` | The alarm posted figs's answers, as the provider's speech recognition heard them | Act on them, quoting them as heard |
+| `pending` | The call is over, but the provider's analysis holding the answers hasn't arrived. The alarm keeps checking for up to 24 hours | Run `status` again later. Don't file again to ask the same thing |
+| `unavailable` | The analysis never arrived, and the alarm gave up | Ask figs in the room |
+| `none` | No answers will come: the call ended without them, or there was no call | Go by the outcome, and ask figs in the room if you still need to know |
+| `not-asked` | No questions were asked | Nothing |
+
+`--wait` keeps polling while answers are `pending`. The answers are figs's words after speech
+recognition and the provider's extraction, so they can be misheard: quote them as heard, and say
+so, when you act on them. `acknowledged: yes` or `no` is the provider's reading of whether figs
+pressed 1 or said okay: more evidence that figs heard the call, not proof.
 
 Warnings: a label added by someone other than the worker, or a comment from someone else that
 looks like the worker's, is ignored and named in a `warning:` line. If one shows up, tell
@@ -146,6 +174,7 @@ Nothing is filed unless the line says otherwise.
 | Line starts with | Do |
 | --- | --- |
 | `not filed: the text …` | Rewrite the text (§ The text) |
+| `not filed: question …`, `not filed: --ask …` | Rewrite or drop the question (§ Questions) |
 | `not filed: --request-id …`, `not filed: --line …` | Fix the option as the line says |
 | `not filed: … is not a caller` | Your login isn't in the alarm's `princes.json`. Ask whoever runs the alarm; don't use another seat's token |
 | `not filed: … can't label issues` | Your account needs write access to the alarm's repository |
@@ -164,7 +193,7 @@ Nothing is filed unless the line says otherwise.
 | 2 | Refused before filing: nothing was filed |
 | 3 | Filed but not queued, and closed again |
 | 4 | Unknown whether the issue was filed |
-| 5 | Still pending after `--wait` |
+| 5 | Still pending after `--wait`: the outcome, or the answers |
 
 ## Credentials
 
@@ -176,6 +205,6 @@ wake needs permission to create repository dispatch events (Contents write); wit
 
 ## Where the authority lives
 
-- The request format, the limits and the outcome labels: karmaterminal/frond-alarm's README,
-  `submit.sh`, `validate.py` and `dial.py`.
+- The request format, the limits, the outcome labels and how answers come back:
+  karmaterminal/frond-alarm's README, `submit.sh`, `validate.py` and `dial.py`.
 - The whole summoning ladder, from sensors to figs's phone: karmaterminal/frond-alarm#23.

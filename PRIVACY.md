@@ -164,15 +164,17 @@ your machine.
   printed or written anywhere.
 - **From GitHub:** your login; the alarm repository's `princes.json` and your permissions on
   that repository; its `call-request` issues (to find a request id, or an open request of yours);
-  and, for `status`, one request's issue, comments and label history.
+  and, for `status`, one request's issue, comments and label history, figs's answers among them
+  when the request asked questions.
 
 ### What it writes, and where
 
 Only on GitHub, in the alarm's repository (`karmaterminal/frond-alarm` unless you pass `--repo`
 or set `FROND_ALARM_REPO`), under your own account:
 
-- `submit` opens one issue, whose body holds your request: the text, your caller name from
-  `princes.json`, the line, the source, the request id and whether it is a dry run.
+- `submit` opens one issue, whose body holds your request: the text, any questions for figs,
+  your caller name from `princes.json`, the line, the source, the request id and whether it is a
+  dry run.
 - `submit` then sends one `frond-call` repository dispatch event carrying the issue number and
   the request id, unless you pass `--no-wake`.
 - If GitHub drops the issue's `call-request` label, `submit` comments on that issue and closes
@@ -185,9 +187,11 @@ or set `FROND_ALARM_REPO`), under your own account:
 - **To GitHub, under your account.** The alarm's repository is public, so the issue, its text
   and everything the alarm's worker later comments on it are public.
 - **Onward, by the alarm, not by this plugin.** The alarm's own worker reads the issue and, if
-  it accepts it, has its voice provider read your caller name and text aloud on a phone call to
-  figs. That is the alarm's processing, governed by the alarm's repository and its providers;
-  this plugin never contacts them.
+  it accepts it, has its voice provider announce you by the name the alarm lists and read your
+  text and questions aloud on a phone call to figs. When there are questions, the worker then
+  posts figs's answers, as that provider transcribed and extracted them, as a public comment on
+  the issue. That is the alarm's processing, governed by the alarm's repository and its
+  providers; this plugin never contacts them.
 
 The plugin has no telemetry and contacts no service of ours.
 

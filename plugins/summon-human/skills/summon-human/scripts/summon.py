@@ -2,8 +2,8 @@
 """summon-human: ask a frond-alarm repository to phone its human, then read what happened.
 
     summon.py check
-    summon.py submit "TEXT" [--line CODE] [--source prince_manual|outage] [--dry-run]
-                     [--request-id ID] [--no-wake] [--allow-pending]
+    summon.py submit "TEXT" [--ask QUESTION]... [--line CODE] [--source prince_manual|outage]
+                     [--dry-run] [--request-id ID] [--no-wake] [--allow-pending]
     summon.py status (ISSUE | --request-id ID) [--wait SECONDS]
 
 Every command also takes --repo OWNER/NAME (default $FROND_ALARM_REPO, else
@@ -13,7 +13,7 @@ A request is an issue in that repository, written byte for byte as its submit.sh
 title `[call] REQUEST_ID`, the label `call-request`, and a body holding the `frond-call-v1` marker
 and fenced JSON with sorted keys. The alarm's own worker reads the issue, decides and dials; this
 script only files the issue, sends the optional wake, and reads back the labels and comments that
-the worker wrote.
+the worker wrote, figs's answers to any questions among them.
 
 The only credential is the caller's own GitHub token: $FROND_ALARM_TOKEN, $GH_TOKEN, $GITHUB_TOKEN
 or `gh auth token`, in that order. It is sent only to api.github.com and never printed.
@@ -47,6 +47,7 @@ MARKER = "<!-- frond-call-v1 -->"
 DEFAULT_LINE = "707"  # submit.sh's default
 SOURCES = ("prince_manual", "outage")
 MAX_TEXT = 240
+MAX_QUESTIONS, MAX_QUESTION = 3, 120
 SPEAKABLE = re.compile(r"[A-Za-z0-9 .,;:!?'()/-]+")
 REQUEST_ID = re.compile(r"[A-Za-z0-9._:-]{6,80}")
 LINE = re.compile(r"[0-9]{3}")
@@ -60,7 +61,10 @@ OK, GITHUB_ERROR, REFUSED, NOT_QUEUED, UNKNOWN, PENDING = 0, 1, 2, 3, 4, 5
 # Terminal labels, in the order the worker can set them; the first one present wins.
 OUTCOMES = ("answered", "not-answered", "outcome-unknown", "uncertain", "failed", "dry-run",
             "duplicate", "rejected")
-WORKER_LABELS = set(OUTCOMES) | {"dialing", "accepted"}
+ANSWER_LABELS = ("has-answers", "answers-pending", "answers-unavailable")
+WORKER_LABELS = set(OUTCOMES) | {"dialing", "accepted"} | set(ANSWER_LABELS)
+ANSWER_PREFIXES = ("answers:", "answers (reconciled):")  # the worker's comments holding figs's answers
+ACK = re.compile(r"^acknowledged: (yes|no|unknown|pending)$", re.M)
 # What each state means, and what to do next. The skill's outcome table says the same.
 STATES = {
     "answered": ("a human turn, not a voicemail system, is in the call's transcript, so figs very "
@@ -104,6 +108,21 @@ STATES = {
 LIVE_OFF = ("the alarm ran a live request as a dry run, which it does while its live switch is "
             "off, so figs was NOT called.",
             "reach figs another way, and tell the room that the alarm is not live.")
+# Where the answers to a request's questions stand. The skill's answers table says the same.
+ANSWERS = {
+    "not-asked": ("no questions were asked.", "nothing."),
+    "waiting": ("the call has not ended, so there are no answers yet.", "wait: run status again with --wait."),
+    "pending": ("the call is over, but the voice provider's call analysis, which holds figs's answers, "
+                "has not arrived. The alarm keeps checking for up to 24 hours.",
+                "run status again later. Don't file again to ask the same questions."),
+    "received": ("the alarm posted figs's answers on the issue, as the provider's speech recognition "
+                 "heard them.",
+                 "quote them as heard, and say so, when you act on them."),
+    "unavailable": ("the provider's call analysis never arrived, so the alarm gave up on the answers.",
+                    "ask figs in the room."),
+    "none": ("no answers will come: the call ended without them, or there was no call.",
+             "go by the outcome above, and ask figs in the room if you still need to know."),
+}
 
 
 class Stop(Exception):
@@ -193,7 +212,9 @@ class GitHub:
         return user["login"]
 
     def callers(self) -> dict:
-        """The alarm's princes.json: GitHub login -> the caller name the alarm speaks."""
+        """The alarm's princes.json, as its validate.py reads it: GitHub login -> {"prince": the name a
+        request's `from` must equal, "spoken": how the call announces it, "own_voice": whether it has a
+        voice of its own}. A bare string entry, the older format, is both names."""
         data = self.read(f"/repos/{self.repo}/contents/princes.json", accept="application/vnd.github.raw+json")
         if isinstance(data, str):
             try:
@@ -202,7 +223,17 @@ class GitHub:
                 data = None
         if not isinstance(data, dict):
             raise Stop(GITHUB_ERROR, f"{self.repo}'s princes.json is not a JSON object")
-        return {k: v for k, v in data.items() if not k.startswith("_") and isinstance(v, str)}
+        out = {}
+        for login, entry in data.items():
+            if isinstance(entry, str):
+                entry = {"prince": entry}
+            if login.startswith("_") or not isinstance(entry, dict) or not isinstance(entry.get("prince"), str) \
+                    or not entry["prince"]:
+                continue
+            spoken = entry.get("spoken")
+            out[login] = {"prince": entry["prince"], "spoken": spoken if isinstance(spoken, str) and spoken
+                          else entry["prince"], "own_voice": bool(entry.get("voice_id"))}
+        return out
 
     def can_label(self):
         """False only when the repository's `permissions` show neither triage nor more; None when they
@@ -219,10 +250,13 @@ class GitHub:
         return [i for i in items if "pull_request" not in i]
 
 
-def request_body(request_id: str, source: str, caller: str, text: str, line: str, dry_run: bool) -> str:
+def request_body(request_id: str, source: str, caller: str, text: str, line: str, dry_run: bool,
+                 questions=()) -> str:
     """The issue body, byte for byte as the alarm's submit.sh writes it."""
     req = {"request_id": request_id, "source": source, "from": caller, "text": text, "line": line,
            "dry_run": dry_run}
+    if questions:
+        req["questions"] = list(questions)
     return MARKER + "\n```json\n" + json.dumps(req, sort_keys=True) + "\n```"
 
 
@@ -239,19 +273,30 @@ def body_request(body) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def problems(text: str, line: str, source: str, request_id: str) -> list:
-    """What the alarm would reject, checked before anything is filed."""
+def spoken_problems(what: str, words: str, limit: int) -> list:
+    """What the alarm would reject in words it speaks (the text, or a question), plus words with no
+    letter or digit in them, which the alarm would speak as noise."""
+    if not words.strip():
+        return [f"{what} is blank"]
     out = []
-    if not text.strip():
-        out.append("the text is blank")
-    elif len(text) > MAX_TEXT:
-        out.append(f"the text is {len(text)} characters; the limit is {MAX_TEXT}")
-    if text.strip() and not SPEAKABLE.fullmatch(text):
-        bad = "".join(sorted({c for c in text if not SPEAKABLE.fullmatch(c)}))
-        out.append(f"the text has characters the alarm will not speak: {bad!r} (use letters, digits, "
+    if len(words) > limit:
+        out.append(f"{what} is {len(words)} characters; the limit is {limit}")
+    if not SPEAKABLE.fullmatch(words):
+        bad = "".join(sorted({c for c in words if not SPEAKABLE.fullmatch(c)}))
+        out.append(f"{what} has characters the alarm will not speak: {bad!r} (use letters, digits, "
                    "spaces and . , ; : ! ? ' ( ) / - only)")
-    elif text.strip() and not re.search(r"[A-Za-z0-9]", text):
-        out.append("the text has no words")
+    elif not re.search(r"[A-Za-z0-9]", words):
+        out.append(f"{what} has no words")
+    return out
+
+
+def problems(text: str, line: str, source: str, request_id: str, questions=()) -> list:
+    """What the alarm would reject, checked before anything is filed."""
+    out = spoken_problems("the text", text, MAX_TEXT)
+    if len(questions) > MAX_QUESTIONS:
+        out.append(f"--ask was given {len(questions)} times; the alarm takes at most {MAX_QUESTIONS} questions")
+    for i, question in enumerate(questions, 1):
+        out += spoken_problems(f"question {i}", question, MAX_QUESTION)
     if not LINE.fullmatch(line):
         out.append(f"--line {line!r} is not a three-digit line code")
     if source not in SOURCES:
@@ -274,8 +319,15 @@ def parse_time(stamp: str) -> datetime:
     return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
+def ack_of(body: str):
+    """The `acknowledged:` value in one of the worker's answers comments, or None."""
+    m = ACK.search(body or "")
+    return m.group(1) if m else None
+
+
 def assess(issue: dict, comments: list, events: list | None, now: datetime, worker: str = WORKER) -> dict:
-    """Where a request stands, from the labels and comments the alarm's worker wrote.
+    """Where a request and the answers to its questions stand, from the labels and comments the
+    alarm's worker wrote.
 
     Labels anyone else added and comments anyone else wrote are reported as warnings and never
     read as the outcome: the alarm's repository may be public, so anyone can comment there."""
@@ -299,7 +351,7 @@ def assess(issue: dict, comments: list, events: list | None, now: datetime, work
     for c in comments:
         if c in said:
             continue
-        word = (c.get("body") or "").strip().split(" ", 1)[0].rstrip(":").lower()
+        word = ((c.get("body") or "").split(None, 1) or [""])[0].rstrip(":").lower()
         if word in ("lease", "intent", "accepted", "outcome", "answers", "rejected", "duplicate",
                     "uncertain", "failed", "dry"):
             warnings.append(f"a {word!r} comment by {(c.get('user') or {}).get('login') or 'someone'} is not "
@@ -322,6 +374,21 @@ def assess(issue: dict, comments: list, events: list | None, now: datetime, work
         state = "queued"
     live = bool(request) and request.get("dry_run", False) is False  # the alarm reads a missing dry_run as live
     meaning, step = LIVE_OFF if state == "dry-run" and live else STATES[state]
+    asked = request.get("questions") if isinstance(request.get("questions"), list) else []
+    replies = [c for c in said if (c.get("body") or "").startswith(ANSWER_PREFIXES)]
+    settled = [c for c in replies if ack_of(c.get("body")) != "pending"]  # not the placeholders
+    if not asked:
+        answers = "not-asked"  # a settled comment then carries only the acknowledgement
+    elif settled:
+        answers = "received"
+    elif "answers-unavailable" in trusted:
+        answers = "unavailable"
+    elif "answers-pending" in trusted and issue.get("state") == "open":  # the alarm reconciles open issues only
+        answers = "pending"
+    elif state in ("queued", "in-flight", "accepted"):
+        answers = "waiting"
+    else:
+        answers = "none"
     if state == "queued" and issue.get("created_at"):
         waited = int((now - parse_time(issue["created_at"])).total_seconds() // 60)
         if waited >= QUEUED_HINT_MIN:
@@ -330,10 +397,13 @@ def assess(issue: dict, comments: list, events: list | None, now: datetime, work
     return {
         "issue": issue.get("number"), "url": issue.get("html_url"), "request_id": request.get("request_id"),
         "dry_run": request.get("dry_run"), "open": issue.get("state") == "open", "state": state,
-        "terminal": state not in ("queued", "in-flight", "accepted"), "meaning": meaning, "next": step,
-        "labels": sorted(labels), "worker_said": [{"at": c.get("created_at"), "text": first_line(c.get("body"))}
-                                                 for c in said if not (c.get("body") or "").startswith("answers:")],
-        "answers": [c.get("body") for c in said if (c.get("body") or "").startswith("answers:")],
+        "terminal": state not in ("queued", "in-flight", "accepted") and answers != "pending",
+        "meaning": meaning, "next": step, "labels": sorted(labels),
+        "worker_said": [{"at": c.get("created_at"), "text": first_line(c.get("body"))}
+                        for c in said if c not in replies],
+        "questions": asked, "answers_state": answers, "answers_meaning": ANSWERS[answers][0],
+        "answers_next": ANSWERS[answers][1], "answers": [c.get("body") for c in settled],
+        "acknowledged": ack_of(settled[-1].get("body")) if settled else None,
         "other_comments": len(comments) - len(said), "warnings": warnings,
     }
 
@@ -354,14 +424,16 @@ def cmd_check(a, gh: GitHub) -> int:
     caller = gh.callers().get(who)
     labels_ok = gh.can_label()
     ready = bool(caller) and labels_ok is not False
-    data = {"repo": gh.repo, "token": a.token_source, "login": who, "caller": caller,
+    data = {"repo": gh.repo, "token": a.token_source, "login": who, "caller": caller and caller["prince"],
+            "announced_as": caller and caller["spoken"], "own_voice": caller and caller["own_voice"],
             "can_label": labels_ok, "ready": ready}
+    voice = "in a voice of its own" if caller and caller["own_voice"] else "in the alarm's default voice"
     emit(a, data, [
         f"repo: {gh.repo}",
         f"token: from {a.token_source}",
         f"login: {who}",
-        f"caller: {caller}" if caller else f"caller: none: {who} is not in {gh.repo}'s princes.json, so the alarm "
-                                           "rejects its requests",
+        f"caller: {caller['prince']}, announced as {caller['spoken']}, {voice}" if caller else
+        f"caller: none: {who} is not in {gh.repo}'s princes.json, so the alarm rejects its requests",
         {True: "labels: yes, the call-request label will stick",
          False: f"labels: no: {who} can't label issues in {gh.repo} (it needs write access there)",
          None: "labels: not shown for this token; submit checks the label after filing"}[labels_ok],
@@ -372,7 +444,8 @@ def cmd_check(a, gh: GitHub) -> int:
 
 def cmd_submit(a, gh: GitHub) -> int:
     request_id = a.request_id or str(uuid.uuid4())
-    found = problems(a.text, a.line, a.source, request_id)
+    questions = a.ask or []
+    found = problems(a.text, a.line, a.source, request_id, questions)
     if found:
         raise Stop(REFUSED, "not filed: " + "; ".join(found))
     who = gh.login()
@@ -398,7 +471,7 @@ def cmd_submit(a, gh: GitHub) -> int:
         if mine:
             raise Stop(REFUSED, f"not filed: you already have an open request, #{mine[0]}; read it with status, "
                                 "or pass --allow-pending to file another", issue=mine[0])
-    body = request_body(request_id, a.source, caller, a.text, a.line, a.dry_run)
+    body = request_body(request_id, a.source, caller["prince"], a.text, a.line, a.dry_run, questions)
     st, issue = gh.call("POST", f"/repos/{gh.repo}/issues",
                         {"title": f"[call] {request_id}", "body": body, "labels": [LABEL]})
     number = issue.get("number") if isinstance(issue, dict) else None
@@ -427,8 +500,10 @@ def cmd_submit(a, gh: GitHub) -> int:
         wake = "sent" if wst == 204 else f"not sent ({wst}: {message(wres)})"
     follow = f"python3 {this_script()} status {number} --wait 540"
     emit(a, {"result": "queued", "issue": number, "url": url, "request_id": request_id,
-             "dry_run": a.dry_run, "wake": wake, "next": follow}, [
+             "dry_run": a.dry_run, "questions": len(questions), "wake": wake, "next": follow}, [
         f"queued: {url} (request_id {request_id}{', dry run' if a.dry_run else ''})",
+        *([f"questions: {len(questions)}; figs's answers come back on the issue, and status shows them"]
+          if questions else []),
         f"wake: {wake}" + ("" if wake == "sent" else "; the alarm's 5-minute schedule picks the request up"),
         f"next: {follow}",
     ])
@@ -471,12 +546,16 @@ def cmd_status(a, gh: GitHub) -> int:
     lines = [f"#{view['issue']} {view['request_id'] or '(no request_id)'}: {view['state']}"
              f"{'' if view['terminal'] else ' (still pending)'}",
              f"meaning: {view['meaning']}", f"next: {view['next']}"]
+    if view["questions"]:
+        lines.append(f"answers: {view['answers_state']}: {view['answers_meaning']} Next: {view['answers_next']}")
+    if view["acknowledged"]:
+        lines.append(f"acknowledged: {view['acknowledged']} (the voice provider's reading of the call)")
     if view["worker_said"]:
         lines.append("the alarm's worker said:")
         lines += [f"  {c['at']} {c['text']}" for c in view["worker_said"]]
     if view["answers"]:
-        lines.append("answers (figs's words through speech recognition; see the skill before acting on them):")
-        lines += ["  " + line for body in view["answers"] for line in body.splitlines()]
+        lines.append("what the alarm heard from figs:")
+        lines += ["  " + line for line in view["answers"][-1].splitlines()]
     if view["other_comments"]:
         lines.append(f"{view['other_comments']} other comment(s), not from the worker, not shown")
     lines += [f"warning: {w}" for w in view["warnings"]]
@@ -495,7 +574,10 @@ def parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("check", parents=[common], help="who you are to the alarm; files nothing")
     s = sub.add_parser("submit", parents=[common], help="file one request (the alarm then phones figs)")
-    s.add_argument("text", help=f"what the call says after your caller name; at most {MAX_TEXT} characters")
+    s.add_argument("text", help=f"what the call says after announcing you; at most {MAX_TEXT} characters")
+    s.add_argument("--ask", action="append", metavar="QUESTION",
+                   help=f"a question for figs, asked on the call: up to {MAX_QUESTIONS}, each at most {MAX_QUESTION} "
+                        "characters. The answers come back on the issue")
     s.add_argument("--line", default=DEFAULT_LINE, help="the alarm's line code (default: the alarm's default line)")
     s.add_argument("--source", default="prince_manual", choices=SOURCES,
                    help="prince_manual (default); outage is for the alarm's seat watcher only")
@@ -508,7 +590,8 @@ def parser() -> argparse.ArgumentParser:
     t.add_argument("issue", nargs="?", type=int, help="the request's issue number")
     t.add_argument("--request-id", help="find the request by its request_id instead")
     t.add_argument("--wait", type=int, default=0, metavar="SECONDS",
-                   help="poll every 30 s until the request reaches an outcome or SECONDS pass")
+                   help="poll every 30 s until the request reaches an outcome, and its answers if it asked "
+                        "questions, or SECONDS pass")
     return p
 
 
