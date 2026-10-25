@@ -2,8 +2,8 @@
 """summon-human: ask a frond-alarm repository to phone its human, then read what happened.
 
     summon.py check
-    summon.py submit "TEXT" [--ask QUESTION]... [--line CODE] [--source prince_manual|outage]
-                     [--dry-run] [--request-id ID] [--no-wake] [--allow-pending]
+    summon.py submit "TEXT" [--ask QUESTION]... [--line CODE] [--dry-run] [--request-id ID]
+                     [--no-wake] [--allow-pending]
     summon.py status (ISSUE | --request-id ID) [--wait SECONDS]
 
 Every command also takes --repo OWNER/NAME (default $FROND_ALARM_REPO, else
@@ -45,7 +45,7 @@ WORKER = "github-actions[bot]"  # the login of the alarm workflow's own token
 LABEL = "call-request"
 MARKER = "<!-- frond-call-v1 -->"
 DEFAULT_LINE = "707"  # submit.sh's default
-SOURCES = ("prince_manual", "outage")
+SOURCE = "prince_manual"  # the alarm takes its other source, outage, only from its own seat watcher
 MAX_TEXT = 240
 MAX_QUESTIONS, MAX_QUESTION = 3, 120
 SPEAKABLE = re.compile(r"[A-Za-z0-9 .,;:!?'()/-]+")
@@ -65,8 +65,8 @@ ANSWER_LABELS = ("has-answers", "answers-pending", "answers-unavailable")
 WORKER_LABELS = set(OUTCOMES) | {"dialing", "accepted"} | set(ANSWER_LABELS)
 ANSWER_PREFIXES = ("answers:", "answers (reconciled):")  # the worker's comments holding figs's answers
 ACK = re.compile(r"^acknowledged: (yes|no|unknown|pending)$", re.M)
-# Comments the alarm's worker reads from any author: a stranger's one can hold a request in flight,
-# close it as uncertain, or point the answers the worker posts at another call.
+# Comments the alarm's worker reads from any author: one from someone else can hold a request in
+# flight, close it as uncertain, or point the answers the worker posts at another call.
 ALARM_READS = ("lease", "intent", "accepted")
 LOOKALIKES = ("outcome", "answers", "rejected", "duplicate", "uncertain", "failed", "dry")
 # What each state means, and what to do next. The skill's outcome table says the same.
@@ -294,7 +294,7 @@ def spoken_problems(what: str, words: str, limit: int) -> list:
     return out
 
 
-def problems(text: str, line: str, source: str, request_id: str, questions=()) -> list:
+def problems(text: str, line: str, request_id: str, questions=()) -> list:
     """What the alarm would reject, checked before anything is filed."""
     out = spoken_problems("the text", text, MAX_TEXT)
     if len(questions) > MAX_QUESTIONS:
@@ -303,8 +303,6 @@ def problems(text: str, line: str, source: str, request_id: str, questions=()) -
         out += spoken_problems(f"question {i}", question, MAX_QUESTION)
     if not LINE.fullmatch(line):
         out.append(f"--line {line!r} is not a three-digit line code")
-    if source not in SOURCES:
-        out.append(f"--source must be one of {', '.join(SOURCES)}")
     if not REQUEST_ID.fullmatch(request_id):
         out.append("--request-id must be 6 to 80 characters of letters, digits and . _ : -")
     return out
@@ -334,7 +332,7 @@ def assess(issue: dict, comments: list, events: list | None, now: datetime, work
     alarm's worker wrote.
 
     Labels anyone else added and comments anyone else wrote are reported as warnings and never
-    read as the outcome: the alarm's repository may be public, so anyone can comment there."""
+    read as the outcome: anyone with access to the alarm's repository can comment there."""
     labels = names(issue.get("labels"))
     added_by = {}
     for e in events or []:
@@ -451,7 +449,7 @@ def cmd_check(a, gh: GitHub) -> int:
 def cmd_submit(a, gh: GitHub) -> int:
     request_id = a.request_id or str(uuid.uuid4())
     questions = a.ask or []
-    found = problems(a.text, a.line, a.source, request_id, questions)
+    found = problems(a.text, a.line, request_id, questions)
     if found:
         raise Stop(REFUSED, "not filed: " + "; ".join(found))
     who = gh.login()
@@ -477,7 +475,7 @@ def cmd_submit(a, gh: GitHub) -> int:
         if mine:
             raise Stop(REFUSED, f"not filed: you already have an open request, #{mine[0]}; read it with status, "
                                 "or pass --allow-pending to file another", issue=mine[0])
-    body = request_body(request_id, a.source, caller["prince"], a.text, a.line, a.dry_run, questions)
+    body = request_body(request_id, SOURCE, caller["prince"], a.text, a.line, a.dry_run, questions)
     st, issue = gh.call("POST", f"/repos/{gh.repo}/issues",
                         {"title": f"[call] {request_id}", "body": body, "labels": [LABEL]})
     number = issue.get("number") if isinstance(issue, dict) else None
@@ -585,8 +583,6 @@ def parser() -> argparse.ArgumentParser:
                    help=f"a question for figs, asked on the call: up to {MAX_QUESTIONS}, each at most {MAX_QUESTION} "
                         "characters. The answers come back on the issue")
     s.add_argument("--line", default=DEFAULT_LINE, help="the alarm's line code (default: the alarm's default line)")
-    s.add_argument("--source", default="prince_manual", choices=SOURCES,
-                   help="prince_manual (default); outage is for the alarm's seat watcher only")
     s.add_argument("--dry-run", action="store_true", help="the alarm processes it fully and places no call")
     s.add_argument("--request-id", help="your own id, 6-80 of A-Za-z0-9._:- (default: a new UUID)")
     s.add_argument("--no-wake", action="store_true", help="skip the wake; the alarm's 5-minute schedule picks it up")

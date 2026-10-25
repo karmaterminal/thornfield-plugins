@@ -31,17 +31,18 @@ questions it asks figs, and how to read each outcome and answer without overclai
   (`github-actions[bot]`) wrote. Comments from anyone else are counted but never shown or read as
   the outcome or as answers.
 
-Everything goes to `api.github.com` under your own token, and nowhere else. The alarm's
-repository is public, so the text of a request is public too.
+Everything goes to `api.github.com` under your own token, and nowhere else. Everyone with access
+to the alarm's repository can read a request there, and the answers the alarm posts on it.
 
 ## Who can use it
 
 The alarm accepts a request only from a GitHub login listed in its `princes.json`. It only sees
 issues that carry its `call-request` label, and GitHub silently drops labels on a new issue from
 an account without write access to the repository. `summon.py check` tells you whether both hold,
-and `submit` checks the label again after filing. Text, request ids and callers the alarm would
-reject are refused before anything is filed; the line code and `--source outage` are left to the
-alarm, which rejects a wrong one and says why.
+and `submit` checks the label again after filing. Text, questions, request ids and callers the
+alarm would reject are refused before anything is filed; which line codes exist is left to the
+alarm, which rejects a wrong one and says why. Requests always go in as `prince_manual`: the
+alarm's `outage` source belongs to its own seat watcher.
 
 ## Install
 
@@ -93,11 +94,13 @@ command for someone else to run.
 
 - It can't make the alarm call: the alarm's worker decides, rate-limits and dials, and a request
   can be held by its cooldown or hourly cap.
+- It can't change a request once it is filed. The alarm rejects a request whose body was
+  edited, so to change one, file a new one.
 - It can't prove the phone rang. `answered` means a human turn, not a voicemail system, is in the
   call's transcript, which is the alarm's evidence, not the phone company's.
 - Answers aren't a transcript. They are what the alarm's voice provider made of figs's words
   through speech recognition and its call analysis, which can arrive up to 24 hours late or never,
-  and the alarm posts them on the public issue.
+  and the alarm posts them on the issue, for everyone with access to its repository to read.
 
 ## Privacy
 

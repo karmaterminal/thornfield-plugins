@@ -184,13 +184,14 @@ or set `FROND_ALARM_REPO`), under your own account:
 
 ### What leaves your machine, and to whom
 
-- **To GitHub, under your account.** The alarm's repository is public, so the issue, its text
-  and everything the alarm's worker later comments on it are public.
+- **To GitHub, under your account.** Everyone with access to the alarm's repository can read the
+  issue, its text and everything the alarm's worker later comments on it. If you point `--repo`
+  at a public repository, that is everyone.
 - **Onward, by the alarm, not by this plugin.** The alarm's own worker reads the issue and, if
   it accepts it, has its voice provider announce you by the name the alarm lists and read your
   text and questions aloud on a phone call to figs. When there are questions, the worker then
-  posts figs's answers, as that provider transcribed and extracted them, as a public comment on
-  the issue. That is the alarm's processing, governed by the alarm's repository and its
+  posts figs's answers, as that provider transcribed and extracted them, as a comment on the
+  issue. That is the alarm's processing, governed by the alarm's repository and its
   providers; this plugin never contacts them.
 
 The plugin has no telemetry and contacts no service of ours.

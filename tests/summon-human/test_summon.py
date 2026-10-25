@@ -164,7 +164,7 @@ def submit_sh_args(args):
 
 def golden_argv(v):
     text, line, source, dry, asks = submit_sh_args(v["args"])
-    argv = ["submit", text, "--request-id", v["request_id"], "--line", line, "--source", source]
+    argv = ["submit", text, "--request-id", v["request_id"], "--line", line]
     for question in asks:
         argv += ["--ask", question]
     return argv + (["--dry-run"] if dry else [])
@@ -213,6 +213,11 @@ class GoldenBytes(unittest.TestCase):
     def test_issue_and_wake_match_submit_sh(self):
         for v in GOLDEN["vectors"]:
             with self.subTest(v["name"]):
+                text, line, source, dry, asks = submit_sh_args(v["args"])
+                if source != "prince_manual":  # outage is the alarm's seat watcher's; summon.py never files it
+                    self.assertEqual(summon.request_body(v["request_id"], source, PRINCES[v["login"]], text, line,
+                                                         dry, asks), v["body"])
+                    continue
                 fake = FakeGitHub(login=v["login"], callers=GOLDEN["callers"], next_number=GOLDEN["issue_number"])
                 code, out, err = run(fake, *golden_argv(v))
                 self.assertEqual(code, 0, err)
@@ -262,7 +267,7 @@ class GoldenBytes(unittest.TestCase):
         alarm = alarm_module("validate")
 
         def agree(text, rid, line, questions):
-            mine = summon.problems(text, line, "prince_manual", rid, questions)
+            mine = summon.problems(text, line, rid, questions)
             sent = summon.request_body(rid, "prince_manual", "example", text, line, False, questions)
             try:
                 alarm.validate(alarm.parse_body(sent), "example-caller", f"[call] {rid}", PRINCES)
@@ -347,11 +352,15 @@ class Refusals(unittest.TestCase):
         self.assertRefused(FakeGitHub(), ["submit", "Need paws.", "--request-id", "has space here"], "--request-id")
         self.assertRefused(FakeGitHub(), ["submit", "Need paws.", "--line", "7O7"], "--line")
 
-    def test_bad_source_is_a_usage_error(self):
-        fake = FakeGitHub()
-        code, _, err = run(fake, "submit", "Need paws.", "--source", "pager")
-        self.assertEqual(code, 2)
-        self.assertEqual(fake.calls, [])
+    def test_source_is_not_an_option(self):
+        # The alarm rejects source outage from anyone but its own seat watcher, so summon.py never files it.
+        for source in ("outage", "prince_manual"):
+            with self.subTest(source):
+                fake = FakeGitHub()
+                code, _, err = run(fake, "submit", "Need paws.", "--source", source)
+                self.assertEqual(code, 2)
+                self.assertIn("unrecognized arguments: --source", err)
+                self.assertEqual(fake.calls, [])
 
     def test_not_a_caller(self):
         self.assertRefused(FakeGitHub(login="stranger"), ["submit", "Need paws."], "not a caller")
@@ -835,7 +844,7 @@ class SkillInStep(unittest.TestCase):
         self.assertEqual(len(examples), 2)
         for text in examples:
             with self.subTest(text):
-                self.assertEqual(summon.problems(text, "707", "prince_manual", "req-000001"), [])
+                self.assertEqual(summon.problems(text, "707", "req-000001"), [])
 
     def test_exit_codes(self):
         for code in (summon.OK, summon.GITHUB_ERROR, summon.REFUSED, summon.NOT_QUEUED, summon.UNKNOWN, summon.PENDING):
