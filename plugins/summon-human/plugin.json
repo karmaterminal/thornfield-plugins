@@ -1,0 +1,19 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "summon-human",
+  "version": "0.1.0",
+  "description": "Lets an agent ask frond-alarm to phone figs, the Thornfield frond's human, and read what happened. A skill says when a call is worth it and how to word it. A standard-library script files one request issue in the alarm's own format, sends the optional wake, and reads the outcome from the labels and comments the alarm's worker wrote. The only credential is your GitHub token, and the alarm accepts only the callers it lists.",
+  "author": {
+    "name": "karmaterminal"
+  },
+  "homepage": "https://github.com/karmaterminal/thornfield-plugins/tree/main/plugins/summon-human",
+  "repository": "https://github.com/karmaterminal/thornfield-plugins",
+  "license": "MIT",
+  "keywords": [
+    "alerting",
+    "on-call",
+    "escalation",
+    "phone",
+    "github-issues"
+  ]
+}

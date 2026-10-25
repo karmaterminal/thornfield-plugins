@@ -1,0 +1,139 @@
+{
+ "_comment": "Captured from karmaterminal/frond-alarm submit.sh at commit 32b40a23efa8e20696bfe4bcca4062901e447ad4 (blob 7a552eb8296dfd1580ca77694c87117f2b84dab9), run with REQUEST_ID set, against a fake gh that records its argv, beside a test princes.json mapping example-caller to example and other-caller to other. The fake issue number is 42. test_summon.py checks that summon.py writes the same title, label, body and wake for the same inputs.",
+ "source_commit": "32b40a23efa8e20696bfe4bcca4062901e447ad4",
+ "callers": {
+  "example-caller": "example",
+  "other-caller": "other"
+ },
+ "issue_number": 42,
+ "vectors": [
+  {
+   "name": "default line, manual, live",
+   "login": "example-caller",
+   "args": [
+    "Need paws on the build host: it is off the network and will not come back by itself."
+   ],
+   "request_id": "summon-golden-0001",
+   "title": "[call] summon-golden-0001",
+   "labels": [
+    "call-request"
+   ],
+   "body": "<!-- frond-call-v1 -->\n```json\n{\"dry_run\": false, \"from\": \"example\", \"line\": \"707\", \"request_id\": \"summon-golden-0001\", \"source\": \"prince_manual\", \"text\": \"Need paws on the build host: it is off the network and will not come back by itself.\"}\n```",
+   "wake": {
+    "event_type": "frond-call",
+    "client_payload": {
+     "issue_number": "42",
+     "request_id": "summon-golden-0001"
+    }
+   }
+  },
+  {
+   "name": "second line, dry run",
+   "login": "example-caller",
+   "args": [
+    "Dry run of the summon-human plugin, no call wanted.",
+    "213",
+    "prince_manual",
+    "--dry-run"
+   ],
+   "request_id": "summon-golden-0002",
+   "title": "[call] summon-golden-0002",
+   "labels": [
+    "call-request"
+   ],
+   "body": "<!-- frond-call-v1 -->\n```json\n{\"dry_run\": true, \"from\": \"example\", \"line\": \"213\", \"request_id\": \"summon-golden-0002\", \"source\": \"prince_manual\", \"text\": \"Dry run of the summon-human plugin, no call wanted.\"}\n```",
+   "wake": {
+    "event_type": "frond-call",
+    "client_payload": {
+     "issue_number": "42",
+     "request_id": "summon-golden-0002"
+    }
+   }
+  },
+  {
+   "name": "outage source",
+   "login": "other-caller",
+   "args": [
+    "The seat watcher sees two seats down for 15 minutes.",
+    "707",
+    "outage"
+   ],
+   "request_id": "summon-golden-0003",
+   "title": "[call] summon-golden-0003",
+   "labels": [
+    "call-request"
+   ],
+   "body": "<!-- frond-call-v1 -->\n```json\n{\"dry_run\": false, \"from\": \"other\", \"line\": \"707\", \"request_id\": \"summon-golden-0003\", \"source\": \"outage\", \"text\": \"The seat watcher sees two seats down for 15 minutes.\"}\n```",
+   "wake": {
+    "event_type": "frond-call",
+    "client_payload": {
+     "issue_number": "42",
+     "request_id": "summon-golden-0003"
+    }
+   }
+  },
+  {
+   "name": "every allowed punctuation mark",
+   "login": "example-caller",
+   "args": [
+    "Check: (a) the door; (b) the lights! Is it 3/4 done? It's late - sorry, figs."
+   ],
+   "request_id": "summon.golden:0004",
+   "title": "[call] summon.golden:0004",
+   "labels": [
+    "call-request"
+   ],
+   "body": "<!-- frond-call-v1 -->\n```json\n{\"dry_run\": false, \"from\": \"example\", \"line\": \"707\", \"request_id\": \"summon.golden:0004\", \"source\": \"prince_manual\", \"text\": \"Check: (a) the door; (b) the lights! Is it 3/4 done? It's late - sorry, figs.\"}\n```",
+   "wake": {
+    "event_type": "frond-call",
+    "client_payload": {
+     "issue_number": "42",
+     "request_id": "summon.golden:0004"
+    }
+   }
+  },
+  {
+   "name": "edge spaces kept as given",
+   "login": "example-caller",
+   "args": [
+    "  Two spaces either side  ",
+    "707",
+    "prince_manual",
+    "--dry-run"
+   ],
+   "request_id": "summon_golden-0005",
+   "title": "[call] summon_golden-0005",
+   "labels": [
+    "call-request"
+   ],
+   "body": "<!-- frond-call-v1 -->\n```json\n{\"dry_run\": true, \"from\": \"example\", \"line\": \"707\", \"request_id\": \"summon_golden-0005\", \"source\": \"prince_manual\", \"text\": \"  Two spaces either side  \"}\n```",
+   "wake": {
+    "event_type": "frond-call",
+    "client_payload": {
+     "issue_number": "42",
+     "request_id": "summon_golden-0005"
+    }
+   }
+  },
+  {
+   "name": "240 characters",
+   "login": "example-caller",
+   "args": [
+    "The deploy is half done and waits on your approval in GitHub. Nothing is broken yet, but the old build stops serving at the top of the hour. Please approve or tell a prince to roll back. This is the only thing blocking us right now, thanks."
+   ],
+   "request_id": "summon-golden-0006",
+   "title": "[call] summon-golden-0006",
+   "labels": [
+    "call-request"
+   ],
+   "body": "<!-- frond-call-v1 -->\n```json\n{\"dry_run\": false, \"from\": \"example\", \"line\": \"707\", \"request_id\": \"summon-golden-0006\", \"source\": \"prince_manual\", \"text\": \"The deploy is half done and waits on your approval in GitHub. Nothing is broken yet, but the old build stops serving at the top of the hour. Please approve or tell a prince to roll back. This is the only thing blocking us right now, thanks.\"}\n```",
+   "wake": {
+    "event_type": "frond-call",
+    "client_payload": {
+     "issue_number": "42",
+     "request_id": "summon-golden-0006"
+    }
+   }
+  }
+ ]
+}

@@ -26,6 +26,7 @@ copilot plugin install learned-skills@thornfield-plugins
 | --- | --- |
 | [learned-skills](plugins/learned-skills/) | Turns repeated work into reviewable skills using Claude Code or GitHub Copilot CLI, with a confined background review, a notice and one-command undo. Opt-in per project. Read its README for data and cost disclosures. |
 | [causal-bug-proof](plugins/causal-bug-proof/) | Proves a bug's cause instead of guessing it: a fossil test that fails today, a traced code path and history, the smallest fix, and a revert that brings the failure back. Instructions only: no hooks, servers or background runs. |
+| [summon-human](plugins/summon-human/) | Lets an agent ask [frond-alarm](https://github.com/karmaterminal/frond-alarm) to phone figs, the Thornfield frond's human, and read what happened, using only the caller's GitHub token. For callers the alarm lists; a skill and a standard-library script, no hooks or servers. |
 
 ## Contributing
 
