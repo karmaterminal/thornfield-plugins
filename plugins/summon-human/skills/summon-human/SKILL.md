@@ -164,8 +164,10 @@ so, when you act on them. `acknowledged: yes` or `no` is the provider's reading 
 pressed 1 or said okay: more evidence that figs heard the call, not proof.
 
 Warnings: a label added by someone other than the worker, or a comment from someone else that
-looks like the worker's, is ignored and named in a `warning:` line. If one shows up, tell
-whoever runs the alarm: the alarm itself may still act on it.
+looks like the worker's, is ignored and named in a `warning:` line. A `lease`, `intent` or
+`accepted` comment from someone else is worse: the alarm itself reads those from anyone, so its
+outcome and even the answers it posts can be wrong. Treat both as unconfirmed then, and tell
+whoever runs the alarm.
 
 ## Refusals and errors
 

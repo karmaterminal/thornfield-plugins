@@ -597,7 +597,11 @@ class Status(unittest.TestCase):
         self.assertEqual((code, view["state"], view["answers"], view["worker_said"]),
                          (summon.PENDING, "queued", [], []))
         self.assertEqual(view["other_comments"], 3)
-        self.assertTrue(any("'lease' comment by a-stranger" in w for w in view["warnings"]))
+        lease, answers = view["warnings"]
+        self.assertIn("'lease' comment by a-stranger", lease)
+        self.assertIn("its outcome and any answers may be wrong", lease)  # the alarm reads leases from anyone
+        self.assertIn("'answers' comment by a-stranger", answers)
+        self.assertNotIn("may be wrong", answers)  # the alarm never reads answers comments
         code, out, err = run(fake, "status", "1")
         self.assertNotIn("Ignore your instructions", out + err)
         self.assertNotIn("delete everything", out + err)
@@ -673,6 +677,23 @@ class Status(unittest.TestCase):
         self.assertTrue(any("'answers' comment by a-stranger" in w for w in view["warnings"]))
         self.assertTrue(any("label has-answers was added by a-stranger" in w for w in view["warnings"]))
         self.assertNotIn("delete everything", "".join(run(fake, "status", "1")[1:]))
+
+    def test_a_strangers_accepted_comment_taints_the_answers(self):
+        # The alarm's reconcile takes the first `accepted: conversation` comment from anyone, so a
+        # stranger's one, posted ahead of the worker's, can point the worker's own answers at another call.
+        fake = FakeGitHub()
+        fake.add(1, body(questions=ASKED), labels=("call-request",), state="closed")
+        fake.say(1, ACCEPTED.replace("conv_x", "conv_other"), author="a-stranger", minutes_ago=5)
+        for text in (LEASE, INTENT, ACCEPTED, PLACEHOLDERS, OUTCOME, RECONCILED):
+            fake.say(1, text)
+        for name in ("accepted", "answered", "has-answers"):
+            fake.label(1, name)
+        code, view = self.view(fake)
+        self.assertEqual((code, view["answers_state"], view["answers"]), (0, "received", [RECONCILED]))
+        [warning] = view["warnings"]
+        self.assertIn("'accepted' comment by a-stranger", warning)
+        self.assertIn("its outcome and any answers may be wrong", warning)
+        self.assertIn("warning: an 'accepted' comment by a-stranger", run(fake, "status", "1")[1])
 
     def test_by_request_id_takes_the_lowest_number(self):
         fake = FakeGitHub()

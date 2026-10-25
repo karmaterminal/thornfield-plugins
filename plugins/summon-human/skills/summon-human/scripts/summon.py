@@ -65,6 +65,10 @@ ANSWER_LABELS = ("has-answers", "answers-pending", "answers-unavailable")
 WORKER_LABELS = set(OUTCOMES) | {"dialing", "accepted"} | set(ANSWER_LABELS)
 ANSWER_PREFIXES = ("answers:", "answers (reconciled):")  # the worker's comments holding figs's answers
 ACK = re.compile(r"^acknowledged: (yes|no|unknown|pending)$", re.M)
+# Comments the alarm's worker reads from any author: a stranger's one can hold a request in flight,
+# close it as uncertain, or point the answers the worker posts at another call.
+ALARM_READS = ("lease", "intent", "accepted")
+LOOKALIKES = ("outcome", "answers", "rejected", "duplicate", "uncertain", "failed", "dry")
 # What each state means, and what to do next. The skill's outcome table says the same.
 STATES = {
     "answered": ("a human turn, not a voicemail system, is in the call's transcript, so figs very "
@@ -352,11 +356,13 @@ def assess(issue: dict, comments: list, events: list | None, now: datetime, work
         if c in said:
             continue
         word = ((c.get("body") or "").split(None, 1) or [""])[0].rstrip(":").lower()
-        if word in ("lease", "intent", "accepted", "outcome", "answers", "rejected", "duplicate",
-                    "uncertain", "failed", "dry"):
-            warnings.append(f"a {word!r} comment by {(c.get('user') or {}).get('login') or 'someone'} is not "
-                            "from the alarm's worker: ignored here, though the alarm may still act on it; "
-                            "tell its maintainers")
+        who = (c.get("user") or {}).get("login") or "someone"
+        kind = f"{'an' if word[:1] in 'aeiou' else 'a'} {word!r} comment by {who}"
+        if word in ALARM_READS:
+            warnings.append(f"{kind} is not from the alarm's worker. The alarm reads such comments from "
+                            "anyone, so its outcome and any answers may be wrong; tell its maintainers")
+        elif word in LOOKALIKES:
+            warnings.append(f"{kind} is not from the alarm's worker: ignored")
     starts = lambda prefix: any((c.get("body") or "").startswith(prefix) for c in said)  # noqa: E731
     request = body_request(issue.get("body")) or {}
     outcome = next((lb for lb in OUTCOMES if lb in trusted), None)
