@@ -236,11 +236,11 @@ class Copilot(unittest.TestCase):
         while time.monotonic() < deadline:
             try:
                 os.kill(pid, 0)
-            except ProcessLookupError:
+                with open(f"/proc/{pid}/stat") as fh:  # reparented zombies count as gone
+                    if fh.read().rsplit(")", 1)[1].split()[0] == "Z":
+                        return
+            except (ProcessLookupError, FileNotFoundError):  # reaped, even between the two checks
                 return
-            with open(f"/proc/{pid}/stat") as fh:  # reparented zombies count as gone
-                if fh.read().rsplit(")", 1)[1].split()[0] == "Z":
-                    return
             time.sleep(0.05)
         os.kill(pid, 9)
         self.fail(f"descendant {pid} outlived the engine call")
