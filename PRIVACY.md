@@ -151,6 +151,57 @@ the plugin does not override them.
 - Data already sent to the selected inference provider is governed by your agreement with it.
   Data already pushed to a sink is in that repository's history; remove it there.
 
+## summon-human
+
+summon-human is one skill and one Python script, `summon.py`. It has no hooks, no MCP servers
+and no background runs: the script runs only when Claude (or you) runs it, and stores nothing on
+your machine.
+
+### What it reads
+
+- **Your GitHub token**, from `FROND_ALARM_TOKEN`, `GH_TOKEN` or `GITHUB_TOKEN`, or from
+  `gh auth token`. It is sent only to `api.github.com`, in the request header, and is never
+  printed or written anywhere.
+- **From GitHub:** your login; the alarm repository's `princes.json` and your permissions on
+  that repository; its `call-request` issues (to find a request id, or an open request of yours);
+  and, for `status`, one request's issue, comments and label history, figs's answers among them
+  when the request asked questions.
+
+### What it writes, and where
+
+Only on GitHub, in the alarm's repository (`karmaterminal/frond-alarm` unless you pass `--repo`
+or set `FROND_ALARM_REPO`), under your own account:
+
+- `submit` opens one issue, whose body holds your request: the text, any questions for figs,
+  your caller name from `princes.json`, the line, the source, the request id and whether it is a
+  dry run.
+- `submit` then sends one `frond-call` repository dispatch event carrying the issue number and
+  the request id, unless you pass `--no-wake`.
+- If GitHub drops the issue's `call-request` label, `submit` comments on that issue and closes
+  it, so that it can never be called later.
+
+`check` and `status` only read.
+
+### What leaves your machine, and to whom
+
+- **To GitHub, under your account.** Everyone with access to the alarm's repository can read the
+  issue, its text and everything the alarm's worker later comments on it. If you point `--repo`
+  at a public repository, that is everyone.
+- **Onward, by the alarm, not by this plugin.** The alarm's own worker reads the issue and, if
+  it accepts it, has its voice provider announce you by the name the alarm lists and read your
+  text and questions aloud on a phone call to figs. When there are questions, the worker then
+  posts figs's answers, as that provider transcribed and extracted them, as a comment on the
+  issue. That is the alarm's processing, governed by the alarm's repository and its
+  providers; this plugin never contacts them.
+
+The plugin has no telemetry and contacts no service of ours.
+
+### How to delete it
+
+Uninstall the plugin: `/plugin uninstall summon-human@thornfield-plugins`, or in Copilot
+`copilot plugin uninstall summon-human`. It keeps nothing locally. A request issue stays in the
+alarm's repository and its history; ask that repository's maintainers to delete it.
+
 ## Changes and contact
 
 Changes to this policy are made in this file, and its history is the repository's git history.
