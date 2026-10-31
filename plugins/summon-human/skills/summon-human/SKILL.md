@@ -1,15 +1,16 @@
 ---
 name: summon-human
 description: >-
-  Use when an agent needs figs, the frond's human, to act now and only a phone call will reach
-  figs in time: a seat or host needs hands-on recovery, an outage waits on a decision only figs
-  can make, or figs asked to be called when something happens. Triggers include "call figs",
-  "phone figs", "wake figs up", "summon the human", "page figs", "ask figs on the phone", "ring
-  the alarm" and "frond-alarm". Files one short request with frond-alarm, which phones figs and
-  can ask up to 3 questions, then reads the outcome (answered, not-answered, uncertain, failed,
-  dry-run, rejected) and figs's answers from the alarm's own labels and comments. Prevents calls
-  for noise, text the alarm refuses or can't speak, private details in a request others can read,
-  two calls for one event, and reading an accepted or uncertain call as answered.
+  Use when an agent wants figs, the frond's human, here now, for any reason and at any hour: figs
+  has said any prince or scribe-prince may call or page figs, without second-guessing. Also for
+  asking figs up to 3 questions on the phone, and for a dry run of the setup. Triggers include "I
+  want figs here now", "call figs", "phone figs", "page figs", "wake figs up", "summon the human",
+  "ask figs on the phone", "ring the alarm" and "frond-alarm". Files one short request with
+  frond-alarm, which phones figs, then reads the outcome (answered, not-answered, uncertain,
+  failed, dry-run, rejected) and figs's answers from the alarm's own labels and comments. For a
+  question that can wait, it points to the light path instead, an @-mention of figs in the room.
+  Prevents text the alarm refuses or can't speak, private details in a request others can read,
+  two calls at once for one event, and reading an accepted or uncertain call as answered.
 metadata: {"openclaw": {"requires": {"bins": ["python3"]}}}
 ---
 
@@ -21,22 +22,44 @@ metadata: {"openclaw": {"requires": {"bins": ["python3"]}}}
 
 frond-alarm turns one GitHub issue into at most one phone call to figs. This skill files that
 issue and reads what happened. It can't place a call itself, and it holds no provider keys: the
-alarm decides, rate-limits and dials. Summoning is the last rung, after the room and the princes.
+alarm decides, rate-limits and dials.
 
-## When to summon, and when not
+figs has said that any prince or scribe-prince may call figs, or page figs to come, at any hour,
+for any reason, without second-guessing (thornfield-plugins#16). Wanting figs here now is reason
+enough, and one command does it (§ Summon now). For a question that can wait until figs reads the
+room, take the light path instead: an @-mention of figs in the room (§ The light path).
 
-| Situation | Summon? |
+## Summon now
+
+When you want figs here now, this one command is the whole step:
+
+```bash
+python3 {baseDir}/scripts/summon.py submit "Please come to the room now. I want you here."
+```
+
+- Say what you need first, in your own words, if you like (§ The text). No reason is required.
+- When `submit` refuses, it files nothing, and its line says why (§ Refusals and errors).
+- Its last line is the `status` command to run next (§ Read the outcome). Say in the room that you
+  summoned figs, so no one summons figs again for the same thing.
+
+## When to summon, and when to use the room
+
+| You want | Do |
 | --- | --- |
-| A seat or host is down, the frond can't bring it back, and it needs hands on it | Yes |
-| An outage or data loss is under way and waits on a decision only figs can make | Yes |
-| A credential leaked and only figs can revoke or rotate it | Yes |
-| figs asked to be phoned when something happens, and it happened | Yes |
-| A prince could do it, or it can wait until figs next reads the room | No: post in the room |
-| Status, an FYI, "done", a question that can wait an hour | No |
-| figs hasn't answered in chat yet, and nothing is breaking | No |
-| You already have a request pending, or a prince just summoned for the same thing | No: read its status |
-| You are setting up or testing | `--dry-run` only |
-| An earlier call came back `uncertain` or `outcome-unknown` | No new call for the same thing: it may have rung |
+| figs here now, for any reason, at any hour | Summon (§ Summon now). Don't second-guess it |
+| figs to answer or decide something on the call | Summon with up to 3 `--ask` questions (§ Questions) |
+| Something that can wait until figs reads the room: a question, news, an FYI | The light path (§ The light path) |
+| Your own request is still open, or another seat just summoned figs for the same thing | Read that request's `status`: figs is already being called |
+| An earlier call came back `uncertain` or `outcome-unknown` | It may have rung: say so in the room, and don't file again at once (§ Read the outcome) |
+| To set up or test | `--dry-run` (§ Submit). It still opens a real issue on the alarm's repository, but places no call |
+
+## The light path
+
+For anything that can wait until figs reads the room, post it there with an @-mention of figs.
+That notifies figs without a phone call. In a message a bot sends to Discord, only a mention
+written `<@ID>`, with figs's Discord user ID, notifies; a plain "@figs" notifies no one. The ID
+isn't written here because this repository is public: take it from a message figs sent in the
+room, or from your seat's own notes.
 
 ## Hard rules
 
@@ -46,7 +69,9 @@ alarm decides, rate-limits and dials. Summoning is the last rung, after the room
   or anything private in the text or a question, and never ask figs for one.
 - **One request at a time.** `submit` refuses while you have an open live request; read that one
   with `status`. Pass `--allow-pending` only for a different event.
-- **Never refile an `uncertain` or `outcome-unknown` call for the same thing.** It may have rung.
+- **Don't file again at once after an `uncertain` or `outcome-unknown` call.** It may have rung.
+  If figs hasn't come once the alarm's 10-minute cooldown is over and you still want figs, file
+  one new request.
 - **Never edit a request after filing.** The alarm rejects a request whose body was edited, and
   never calls it. To change one, file a new one: close the old issue first while `status` still
   says `queued`; past that, follow up in the room instead.
@@ -60,10 +85,12 @@ alarm decides, rate-limits and dials. Summoning is the last rung, after the room
 
 | You want to | Go to |
 | --- | --- |
+| Get figs here now | § Summon now |
+| Reach figs without a call | § The light path |
 | Know whether you can summon at all | § Check |
 | Write what the call will say | § The text |
 | Ask figs something on the call | § Questions |
-| Summon | § Submit |
+| Use another option of `submit` | § Submit |
 | Know what happened | § Read the outcome |
 | Understand an error line | § Refusals and errors |
 
@@ -112,7 +139,7 @@ python3 {baseDir}/scripts/summon.py submit "TEXT"
 | Option | What it does |
 | --- | --- |
 | `--ask QUESTION` | A question for figs, asked on the call (§ Questions). Up to 3 |
-| `--dry-run` | The alarm validates, dedupes and queues it, then places no call. Use it to test |
+| `--dry-run` | The alarm validates, dedupes and queues it, then places no call. It is still a real issue on the alarm's repository. Use it to test |
 | `--request-id ID` | Your own id, 6 to 80 of letters, digits and `. _ : -`. Default: a new UUID. Reuse an id only to look a request up, never to file twice |
 | `--line CODE` | One of the alarm's line codes (its README lists them). Default: the alarm's default line |
 | `--no-wake` | Skip the wake. Use it when your token can't create repository dispatch events; the alarm's 5-minute schedule picks the request up |
@@ -139,8 +166,8 @@ run it in the background. A call usually ends within 3 minutes of `accepted`.
 | `in-flight` | The worker holds it and is placing the call | Wait |
 | `accepted` | The provider accepted the call. Not yet rang | Wait |
 | `answered` | A human turn, not a voicemail system, is in the transcript: figs very likely heard it | Follow up in the room with the details |
-| `not-answered` | The phone company or the voice provider reported no answer, busy or canceled | Try the room. If still urgent after the cooldown, file once more |
-| `outcome-unknown` | Accepted, but nothing shows how it ended: voicemail suspected, a silent call, or no result in time. It may have rung | Say in the room a call may have reached figs. Don't refile |
+| `not-answered` | The phone company or the voice provider reported no answer, busy or canceled | @-mention figs in the room. If you still want figs after the 10-minute cooldown, file one new request |
+| `outcome-unknown` | Accepted, but nothing shows how it ended: voicemail suspected, a silent call, or no result in time. It may have rung | Say in the room a call may have reached figs. Don't file again at once; if figs hasn't come after the cooldown and you still want figs, file one new request |
 | `uncertain` | The call may or may not have been placed. The alarm never redials it | As for `outcome-unknown` |
 | `failed` | Nothing was sent: the provider refused, or the alarm couldn't resolve the number or read its copy of the request | figs was not called. Tell the room. Filing again likely fails the same way |
 | `dry-run` | No call, by design. If you filed a live request, the alarm's live switch is off and figs was **not** called | Reach figs another way and tell the room |

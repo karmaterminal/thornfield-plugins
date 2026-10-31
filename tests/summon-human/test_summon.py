@@ -846,6 +846,19 @@ class SkillInStep(unittest.TestCase):
             with self.subTest(text):
                 self.assertEqual(summon.problems(text, "707", "req-000001"), [])
 
+    def test_one_step_summon_files_as_written(self):
+        """The skill's one-step command, and the README's copy of it, file as written."""
+        with open(os.path.join(PLUGIN, "README.md")) as fh:
+            readme = fh.read()
+        step = re.compile(r'^python3 \S+/summon\.py submit "([^"]+)"$', re.M)
+        [text] = step.findall(self.skill.split("## Summon now", 1)[1].split("\n## ", 1)[0])
+        self.assertEqual(step.findall(readme), [text])
+        fake = FakeGitHub()
+        code, out, _ = run(fake, "submit", text)
+        self.assertEqual(code, 0, out)
+        [issue] = fake.posts(f"/repos/{REPO}/issues")
+        self.assertEqual(summon.body_request(issue["body"])["text"], text)
+
     def test_exit_codes(self):
         for code in (summon.OK, summon.GITHUB_ERROR, summon.REFUSED, summon.NOT_QUEUED, summon.UNKNOWN, summon.PENDING):
             with self.subTest(code):

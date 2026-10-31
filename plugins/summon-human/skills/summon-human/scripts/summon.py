@@ -76,15 +76,17 @@ STATES = {
                  "follow up in the room with the details the call could not carry."),
     "not-answered": ("the phone company or the voice provider reported no answer, busy or "
                      "canceled: figs did not pick up.",
-                     "do not refile at once. Try the room again; if it is still urgent after the "
-                     "alarm's 10-minute cooldown, file one new request."),
+                     "do not refile at once. @-mention figs in the room; if you still want figs "
+                     "after the alarm's 10-minute cooldown, file one new request."),
     "outcome-unknown": ("the provider accepted the call, but nothing shows how it ended: "
                         "voicemail suspected, a silent call, or no result in time. It may have rung.",
                         "treat it as possibly heard. Say in the room that a call may have reached "
-                        "figs; do not refile for the same thing."),
+                        "figs. Do not refile at once; if figs has not come after the alarm's "
+                        "10-minute cooldown and you still want figs, file one new request."),
     "uncertain": ("the call may or may not have been placed. The alarm never redials it.",
-                  "treat it as possibly heard. Say in the room that a call may have reached figs; "
-                  "do not refile for the same thing."),
+                  "treat it as possibly heard. Say in the room that a call may have reached figs. "
+                  "Do not refile at once; if figs has not come after the alarm's 10-minute "
+                  "cooldown and you still want figs, file one new request."),
     "failed": ("nothing was sent: the provider refused the call, or the alarm could not resolve "
                "the number to call or read its own copy of the request.",
                "figs was not called. Tell the room, which can look at the alarm; filing again "
