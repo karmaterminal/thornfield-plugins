@@ -40,6 +40,7 @@ Which tests stayed green at the bad commit, and what they fake that the real pat
 | Fix reverted, fossil kept |  | fails |
 | Fix reapplied |  | passes |
 | Surrounding suite and controls |  | passes, or which failures also fail on the base |
+| Fossil and its inverse kept in the suite | PATHS | pass |
 | End-to-end or live run, if any |  |  |
 
 ## What this establishes
