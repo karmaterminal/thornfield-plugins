@@ -87,6 +87,12 @@ Write down the exact identities before you change anything:
 Copy the evidence somewhere it won't be overwritten. Reproduce the bug on those identities rather than
 reasoning from old logs or someone's summary of them.
 
+Look for earlier sightings too: the transcripts or session logs of the run that failed, the logs of
+earlier runs, the issue history, and the records any review or learning tool keeps, such as the
+learned-skills plugin's work records. "We've seen this before" counts only when you find the earlier
+case, and even then check whether it is the same mechanism. Two true stories with the same symptom are
+easy to glue into one wrong one.
+
 ### 2. Separate the hypotheses
 
 Write each candidate mechanism as its own entry, even when the symptoms look alike: a wrong field in a
@@ -130,6 +136,12 @@ a finding in its own right, not just missing coverage. Look for what those tests
 path depends on: a mocked registry or transport, a fixture that skips cleanup, a stub that always
 succeeds. Put the fossil at the first real boundary above that blind spot, and mock only external I/O.
 Report which fake hid the bug, so that a later change doesn't bring the same blind spot back.
+
+The blind spot can also be a seam between two owners that are each tested correctly. One component's
+tests assert what it emits, another's assert what it refuses, both suites pass, and the contradiction
+shows only when real output reaches the real check, often late in a pipeline. Then write the fossil at
+the seam: run one owner's real output through the other owner's real check, with neither side replaced
+by a hand-written stand-in.
 
 ### 6. Walk back through history
 
@@ -245,6 +257,9 @@ fix revert-proven only when steps 3 and 4 ran.
 
 ### 9. Review and report
 
+- **Keep the fossil.** Once step 8 has run, land it in the project's suite as the regression test,
+  unchanged: it already states the contract. Put its inverse beside it, the case the fix must still
+  refuse or still fail, so that a fix which is too loose fails as well as one which is too narrow.
 - Keep separate mechanisms in separate fixes and separate pull requests.
 - Don't fix an unrelated failure that also fails on the base branch just to get a green run. Report it
   instead.

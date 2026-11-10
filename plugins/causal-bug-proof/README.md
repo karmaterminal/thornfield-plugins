@@ -3,7 +3,8 @@
 A skill that has Claude prove a bug's cause before anyone trusts the fix. Claude pins the behaviour you
 want in a test that fails today and whose assertions never change. It traces the code path and the git
 history, makes the smallest fix where the fault lives, and then shows that the fix is what turns the
-test green: with only the fix reverted the test fails again, and with the fix reapplied it passes.
+test green: with only the fix reverted the test fails again, and with the fix reapplied it passes. The
+test then stays in your suite as the regression test, beside the case the fix must still refuse.
 
 ```text
 symptom -> fossil fails (RED) -> smallest fix -> fossil passes (GREEN)

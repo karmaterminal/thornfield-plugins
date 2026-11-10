@@ -11,6 +11,7 @@ commit messages, pull request descriptions and incident reports.
 | The fossil passes before a commit and fails after it | A first-bad commit, found by behaviour | That it is the only cause |
 | A fix makes the unchanged fossil pass | The fix satisfies the fossil | That the incident is cured |
 | Reverting only the fix makes the fossil fail, and reapplying it makes the fossil pass | The fix is load-bearing for the fossil | That it is the only or the smallest fix, or the incident's cause |
+| The kept fossil and its inverse pass in a later run | The contract still holds at that commit | A fresh revert proof, or anything about a new symptom |
 | An end-to-end or live run shaped like the incident changes with the fix and only with it | Strong support that the fix removes the incident's cause | Anything beyond the identities you froze |
 
 Say "proves" only about a narrow statement whose whole chain of results is in front of you. Otherwise
