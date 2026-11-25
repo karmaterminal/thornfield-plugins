@@ -1,6 +1,9 @@
 import sys
 from pathlib import Path
 import unittest
+import hashlib
+import re
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "prototypes/capsule-import"))
@@ -49,6 +52,46 @@ class PlayerTests(unittest.TestCase):
         with self.assertRaises(PlayError):
             advance(self.capsule, start(self.capsule, "pass"),
                     text="made up", provenance="pass")
+
+    def test_silas_exact_score_resume_and_independent_receipt_ballots(self):
+        # This is the author's unchanged Markdown score, not a claimed capsule import.
+        raw = (ROOT / "tests/story-player/silas-seven-eleven-score.md").read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        self.assertEqual(len(raw), 7161)
+        self.assertEqual(digest, "995f7e39b69c09d7647c28c52d78ddc07dae3437645efa05d91aca651ec5520e")
+        lines = re.findall(r"(?m)^([1-8])\. (\d\d:\d\d) / .*?: ([A-Z ]+)\.", raw.decode("utf-8"))
+        self.assertEqual([int(number) for number, _, _ in lines], list(range(1, 9)))
+        self.assertIn("RETURNED / BORROWED / GIVEN", raw.decode("utf-8"))
+        capsule = SimpleNamespace(id="silas-seven-eleven-score", sha256=digest,
+                                  scenes=tuple(SimpleNamespace(id=f"beat-{number}")
+                                               for number, _, _ in lines))
+
+        first = start(capsule, "first-take")
+        for number in range(1, 5):
+            first = advance(capsule, first, text=lines[number - 1][2], provenance="authored")
+        first = advance(capsule, first, text="RETURNED", provenance="participant",
+                        choice="RETURNED")
+        paused = dump(first)
+        resumed = load(capsule, paused)
+        self.assertEqual(next_scene(capsule, resumed).id, "beat-6")
+        first = advance(capsule, resumed, text="the bell belonged to the house",
+                        provenance="authored")
+        for number in (7, 8):
+            first = advance(capsule, first, text=lines[number - 1][2], provenance="authored")
+        self.assertIsNone(next_scene(capsule, first))
+
+        second = start(capsule, "fresh-take")
+        for number in range(1, 5):
+            second = advance(capsule, second, text=lines[number - 1][2], provenance="authored")
+        second = advance(capsule, second, text="GIVEN", provenance="authored",
+                         choice="GIVEN")
+        second = advance(capsule, second, text="the shop has never received a present",
+                         provenance="authored")
+        self.assertEqual(replay(capsule, load(capsule, dump(first)))[4].choice, "RETURNED")
+        self.assertEqual(replay(capsule, second)[4].choice, "GIVEN")
+        self.assertEqual(replay(capsule, first)[5].text, "the bell belonged to the house")
+        self.assertEqual(replay(capsule, second)[5].text,
+                         "the shop has never received a present")
 
 
 if __name__ == "__main__":
