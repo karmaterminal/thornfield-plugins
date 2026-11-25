@@ -39,6 +39,14 @@ class ImportTests(unittest.TestCase):
         self.assertIn("weather", json.loads(got.source_bytes))
         self.assertEqual(len(got.scenes), 3)
 
+    def test_expected_material_snapshots(self):
+        for name in ("original", "extended"):
+            with self.subTest(name=name):
+                got = dataclasses.asdict(import_file(FIXTURES / (name + ".cassette.json")))
+                del got["source_bytes"]
+                expected = json.loads((FIXTURES / (name + ".material.json")).read_text())
+                self.assertEqual(json.loads(json.dumps(got)), expected)
+
     def test_unknown_fields_survive(self):
         self.obj["future"] = {"anything": [1, 2, 3]}
         self.obj["scenes"][0]["future"] = "preserved"
@@ -107,6 +115,17 @@ class ImportTests(unittest.TestCase):
         for digest in ("0" * 64, "ABC", True):
             with self.subTest(digest=digest), self.assertRaises(CapsuleError):
                 import_bytes(self.raw, digest)
+
+    @unittest.skipUnless(hasattr(sys, "set_int_max_str_digits"), "CPython digit-limit control")
+    def test_integer_parser_limit_is_normalized(self):
+        previous = sys.get_int_max_str_digits()
+        try:
+            sys.set_int_max_str_digits(4300)
+            raw = self.raw[:-2] + b', "extension": ' + b"1" * 4301 + b"}"
+            with self.assertRaises(CapsuleError):
+                import_bytes(raw)
+        finally:
+            sys.set_int_max_str_digits(previous)
 
     def test_surrogate_text(self):
         self.rejects(lambda d: d["scenes"][0].update(seed="\ud800"))

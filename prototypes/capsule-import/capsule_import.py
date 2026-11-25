@@ -82,7 +82,9 @@ def import_bytes(data: bytes, expected_sha256=None) -> Capsule:
     try:
         obj = json.loads(data.decode("utf-8"), object_pairs_hook=_pairs,
                          parse_constant=_invalid_constant, parse_float=_float)
-    except (UnicodeError, json.JSONDecodeError, RecursionError) as exc:
+    except CapsuleError:
+        raise
+    except (ValueError, RecursionError) as exc:
         raise CapsuleError("invalid UTF-8 JSON source") from exc
     if not isinstance(obj, dict):
         raise CapsuleError("capsule must be an object")

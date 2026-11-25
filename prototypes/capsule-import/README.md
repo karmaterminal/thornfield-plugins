@@ -10,6 +10,8 @@ Bounds: 1 MiB source, 1–256 scenes; local file reads reject nonregular files w
 
 There are no network clients, model calls, fetches, writes, clocks, listeners, tool invocations, playback effects or asset execution in the importer. A source’s text is data. Reading a local caller-selected file is not sandbox confinement; caller chooses an authorized path. Capsule hashes are integrity identifiers, not authorship proofs.
 
+Expected JSON material views are checked in at `tests/capsule-import/fixtures/{original,extended}.material.json`: dataclass fields excluding raw `source_bytes`, with tuples represented as arrays. They are adapter-conformance snapshots, not a new adopted capsule format.
+
 Run `python3 tests/capsule-import/test_import.py -v` from repository root. `scripts/validate.sh` also discovers it. Python standard library only, tested on local Python3.14; no other Python version or live plugin execution claimed.
 
 ## Second-format gate
