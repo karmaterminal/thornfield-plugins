@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 import unittest
 import hashlib
+import json
 import re
 from types import SimpleNamespace
 
@@ -92,6 +93,37 @@ class PlayerTests(unittest.TestCase):
         self.assertEqual(replay(capsule, first)[5].text, "the bell belonged to the house")
         self.assertEqual(replay(capsule, second)[5].text,
                          "the shop has never received a present")
+
+    def test_rune_exact_graph_preserves_distinct_routes_and_rejects_forged_choices(self):
+        source = ROOT / "tests/story-player/rune-seven-eleven-score.json"
+        raw = source.read_bytes()
+        digest = hashlib.sha256(raw).hexdigest()
+        self.assertEqual(digest, "05a0666337e78fa4c9a369f71cb66442400a5fd887f421aaa2a69198970c2ceb")
+        score = json.loads(raw)
+        scenes = tuple(SimpleNamespace(**{**item,
+            "choices": tuple(SimpleNamespace(**choice) for choice in item.get("choices", ()))})
+            for item in score["scenes"])
+        capsule = SimpleNamespace(id="rune-seven-eleven-score", sha256=digest,
+                                  start=score["start"], scenes=scenes)
+        first = start(capsule, "read-list")
+        first = advance(capsule, first, text="The list", provenance="authored",
+                        choice="Read the list")
+        self.assertEqual(next_scene(capsule, load(capsule, dump(first))).id, "list")
+        first = advance(capsule, first, text="The marks", provenance="generated",
+                        choice="Follow the faint marks")
+        self.assertEqual(next_scene(capsule, first).id, "marks")
+        second = advance(capsule, start(capsule, "walk-on"), text="The porch",
+                         provenance="authored", choice="Walk before the light changes")
+        self.assertEqual(next_scene(capsule, second).id, "road")
+        self.assertEqual(replay(capsule, load(capsule, dump(first)))[0].choice,
+                         "Read the list")
+        with self.assertRaises(PlayError):
+            advance(capsule, second, text="No such branch", provenance="generated",
+                    choice="Read the list")
+        forged = dump(second).replace(b'"scene_id":"porch"', b'"scene_id":"list"')
+        with self.assertRaises(PlayError):
+            load(capsule, forged)
+        self.assertEqual(raw, source.read_bytes())
 
 
 if __name__ == "__main__":

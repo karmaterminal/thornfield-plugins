@@ -22,3 +22,13 @@ RETURNED take. This is **not** a Markdown capsule importer, a real audience
 ballot, or a live Beacon/Canticle delivery proof.
 
 Run `python3 tests/story-player/test_player.py -v` from repository root.
+
+Rune's exact `thornfield.story.v1` JSON score is preserved separately at
+`tests/story-player/rune-seven-eleven-score.json` (SHA256
+`05a0666337e78fa4c9a369f71cb66442400a5fd887f421aaa2a69198970c2ceb`).
+The replay core now follows its offered choice edges when given a validated
+graph-shaped capsule; it refuses a forged choice or scene sequence and keeps
+two routes in separate takes. The test constructs that capsule from the JSON;
+this is not yet an MV2 reader, story-schema importer, metronome, cue executor,
+or live performance. Duration, speed and effects remain explicit integration
+gaps, rather than inferred from `beat` or silently executed from cue text.

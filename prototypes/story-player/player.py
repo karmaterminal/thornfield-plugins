@@ -36,6 +36,8 @@ def start(capsule, rendition_id: str) -> Rendition:
 
 def next_scene(capsule, rendition: Rendition):
     _check_source(capsule, rendition)
+    if hasattr(capsule, "start"):
+        return _graph_next(capsule, rendition)
     if len(rendition.beats) > len(capsule.scenes):
         raise PlayError("rendition exceeds source scenes")
     return capsule.scenes[len(rendition.beats)] if len(rendition.beats) < len(capsule.scenes) else None
@@ -55,6 +57,8 @@ def advance(capsule, rendition: Rendition, *, text: str, provenance: str,
         raise PlayError("pass must not invent text")
     if choice is not None and (not isinstance(choice, str) or not choice.strip()):
         raise PlayError("invalid choice")
+    if hasattr(capsule, "start"):
+        _graph_route(scene, choice)
     return replace(rendition, beats=rendition.beats +
                    (Beat(scene.id, text, provenance, choice),))
 
@@ -62,6 +66,9 @@ def advance(capsule, rendition: Rendition, *, text: str, provenance: str,
 def replay(capsule, rendition: Rendition) -> tuple[Beat, ...]:
     """Return saved bytes, without invoking a generator or changing the source."""
     _check_source(capsule, rendition)
+    if hasattr(capsule, "start"):
+        _graph_next(capsule, rendition)
+        return rendition.beats
     if len(rendition.beats) > len(capsule.scenes):
         raise PlayError("rendition exceeds source scenes")
     for beat, scene in zip(rendition.beats, capsule.scenes):
@@ -114,3 +121,29 @@ def load(capsule, data: bytes) -> Rendition:
 def _check_source(capsule, rendition: Rendition):
     if rendition.source_sha256 != capsule.sha256 or rendition.source_id != capsule.id:
         raise PlayError("source identity mismatch")
+
+
+def _graph_route(scene, choice: str | None) -> str | None:
+    choices = getattr(scene, "choices", ())
+    if choices:
+        matches = [item.next for item in choices if item.label == choice]
+        if len(matches) != 1:
+            raise PlayError("choice must match one offered branch")
+        return matches[0]
+    if choice is not None:
+        raise PlayError("choice on non-branching scene")
+    return getattr(scene, "next", None)
+
+
+def _graph_next(capsule, rendition: Rendition):
+    scenes = {scene.id: scene for scene in capsule.scenes}
+    if len(scenes) != len(capsule.scenes) or capsule.start not in scenes:
+        raise PlayError("invalid source graph")
+    scene_id = capsule.start
+    for beat in rendition.beats:
+        if scene_id is None or beat.scene_id != scene_id:
+            raise PlayError("scene sequence mismatch")
+        scene_id = _graph_route(scenes[scene_id], beat.choice)
+        if scene_id is not None and scene_id not in scenes:
+            raise PlayError("branch target missing")
+    return scenes[scene_id] if scene_id is not None else None
