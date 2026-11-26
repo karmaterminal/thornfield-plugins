@@ -40,3 +40,9 @@ not an auto-advance clock. Duration, speed and effects remain explicit
 integration gaps rather than silently executed from cue text.
 
 Run `python3 tests/story-player/test_story_reader.py -v` for this boundary.
+The test includes Elliott's immutable 18-specimen/19-invocation byte corpus
+(`tests/story-player/fixtures/elliott-story-conformance-20261125.tar.gz`,
+SHA256 `f865e53f483b0a2e847cb7673559f0a0cc0755e7079008ef18751cd67dca386c`).
+It checks the exact bytes and digest of every specimen, reader refusals, and
+distinct content-addressed IDs for semantically equal but differently formatted
+source. That is reader conformance, not MV2 extraction or live playback acceptance.
