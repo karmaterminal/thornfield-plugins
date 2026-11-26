@@ -2,7 +2,6 @@ import sys
 from pathlib import Path
 import unittest
 import hashlib
-import json
 import re
 from types import SimpleNamespace
 
@@ -11,6 +10,7 @@ sys.path.insert(0, str(ROOT / "prototypes/capsule-import"))
 sys.path.insert(0, str(ROOT / "prototypes/story-player"))
 from capsule_import import import_file
 from player import PlayError, advance, dump, load, next_scene, replay, start
+from story_reader import read_story_bytes
 
 
 class PlayerTests(unittest.TestCase):
@@ -99,12 +99,9 @@ class PlayerTests(unittest.TestCase):
         raw = source.read_bytes()
         digest = hashlib.sha256(raw).hexdigest()
         self.assertEqual(digest, "05a0666337e78fa4c9a369f71cb66442400a5fd887f421aaa2a69198970c2ceb")
-        score = json.loads(raw)
-        scenes = tuple(SimpleNamespace(**{**item,
-            "choices": tuple(SimpleNamespace(**choice) for choice in item.get("choices", ()))})
-            for item in score["scenes"])
-        capsule = SimpleNamespace(id="rune-seven-eleven-score", sha256=digest,
-                                  start=score["start"], scenes=scenes)
+        capsule = read_story_bytes(raw, digest)
+        self.assertEqual(capsule.id, "thornfield.story.v1:sha256:" + digest)
+        self.assertEqual(capsule.source_bytes, raw)
         first = start(capsule, "read-list")
         first = advance(capsule, first, text="The list", provenance="authored",
                         choice="Read the list")

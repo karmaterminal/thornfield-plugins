@@ -26,9 +26,17 @@ Run `python3 tests/story-player/test_player.py -v` from repository root.
 Rune's exact `thornfield.story.v1` JSON score is preserved separately at
 `tests/story-player/rune-seven-eleven-score.json` (SHA256
 `05a0666337e78fa4c9a369f71cb66442400a5fd887f421aaa2a69198970c2ceb`).
-The replay core now follows its offered choice edges when given a validated
-graph-shaped capsule; it refuses a forged choice or scene sequence and keeps
-two routes in separate takes. The test constructs that capsule from the JSON;
-this is not yet an MV2 reader, story-schema importer, metronome, cue executor,
-or live performance. Duration, speed and effects remain explicit integration
-gaps, rather than inferred from `beat` or silently executed from cue text.
+`story_reader.read_story_bytes(raw, expected_sha256=None)` validates this
+bounded v1 graph and hands an immutable source-byte/digest identity to the
+existing replay core. Its capsule ID is
+`thornfield.story.v1:sha256:<SHA256 of original bytes>`; title is not identity.
+It rejects duplicate JSON keys, ambiguous route forms, missing targets,
+cycles, unreachable scenes, malformed durations/cues and digest mismatch. A
+branch requires an explicit offered choice; there is no default/fallthrough.
+Authored metadata remains inert in the original bytes and parsed `authored`
+fields. This is **not** an MV2 reader or exact-frame provenance proof, ballot
+receipt, metronome, cue executor, or live performance. Scene `beat` is data,
+not an auto-advance clock. Duration, speed and effects remain explicit
+integration gaps rather than silently executed from cue text.
+
+Run `python3 tests/story-player/test_story_reader.py -v` for this boundary.
