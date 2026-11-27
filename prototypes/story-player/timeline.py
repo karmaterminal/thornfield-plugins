@@ -117,6 +117,49 @@ def start_timeline(source: Timeline) -> TimelineTake:
     return TimelineTake(source.id)
 
 
+def dump_timeline_take(take: TimelineTake) -> bytes:
+    """Save the elected input and output record, not an inferred summary."""
+    obj = {"version": 1, "source_id": take.source_id,
+           "next_tick": take.next_tick,
+           "listened": [vars(r) for r in take.listened],
+           "sung": [vars(r) for r in take.sung]}
+    return (json.dumps(obj, ensure_ascii=False, sort_keys=True,
+                       separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def load_timeline_take(source: Timeline, raw: bytes) -> TimelineTake:
+    """Reopen without inference, and reject altered source or invalid streams."""
+    if not isinstance(raw, bytes) or not 1 <= len(raw) <= 1024 * 1024:
+        raise TimelineError("invalid take bytes")
+    try:
+        obj = json.loads(raw.decode("utf-8"), object_pairs_hook=_pairs)
+        if (not isinstance(obj, dict) or set(obj) != {"version", "source_id", "next_tick", "listened", "sung"}
+            or type(obj["version"]) is not int or obj["version"] != 1
+            or obj["source_id"] != source.id or type(obj["next_tick"]) is not int
+            or not 0 <= obj["next_tick"] <= source.ticks):
+            raise TimelineError("invalid take header")
+        declared = {s.id: s for s in source.streams}
+        groups = []
+        for key, direction in (("listened", "listen"), ("sung", "sing")):
+            items = obj[key]
+            if not isinstance(items, list) or len(items) > 4096:
+                raise TimelineError("invalid take records")
+            records = []
+            for item in items:
+                if (not isinstance(item, dict) or set(item) != {"tick", "stream", "text"}
+                    or type(item["tick"]) is not int or not 0 <= item["tick"] < obj["next_tick"]
+                    or item["stream"] not in declared or declared[item["stream"]].direction != direction
+                    or not isinstance(item["text"], str)):
+                    raise TimelineError("invalid take record")
+                records.append(Record(**item))
+            if any(a.tick > b.tick for a, b in zip(records, records[1:])):
+                raise TimelineError("out-of-order take records")
+            groups.append(tuple(records))
+        return TimelineTake(source.id, obj["next_tick"], *groups)
+    except (UnicodeError, ValueError, TypeError, KeyError, RecursionError) as exc:
+        raise TimelineError("invalid take") from exc
+
+
 def advance_timeline(source: Timeline, take: TimelineTake, *, listen: tuple[Record, ...], infer) -> TimelineTake:
     """Elect one tick. Infer sees the exact frame; it may sing only declared outputs.
 

@@ -54,8 +54,9 @@ inference function. That function receives one model-facing frame containing
 current input, authored cues, and prior emissions; it returns records on any
 declared sing-out streams. The same tick can emit several views of one event
 (for example, a character's action and the changing smoke in a kitchen).
-The test exercises two outputs, a later controller input, source binding, and
-wrong-direction refusal at this boundary. Run
+Takes save and reopen their exact elected input/output records without
+inference. The test exercises two outputs, a later controller input, source
+binding, wrong-direction refusal and save/reopen at this boundary. Run
 `python3 tests/story-player/test_timeline.py -v`.
 
 This is **not** a real-time clock, game-controller transport, model provider,

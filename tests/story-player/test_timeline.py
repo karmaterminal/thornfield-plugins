@@ -5,8 +5,8 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "prototypes/story-player"))
-from timeline import (Record, TimelineError, advance_timeline, read_timeline,
-                      start_timeline)
+from timeline import (Record, TimelineError, advance_timeline, dump_timeline_take,
+                      load_timeline_take, read_timeline, start_timeline)
 
 
 def source_bytes():
@@ -49,6 +49,7 @@ class TimelineTests(unittest.TestCase):
         self.assertEqual(len(seen[1].prior), 2)
         self.assertEqual([r.stream for r in take.sung], ["action", "smoke", "action", "smoke"])
         self.assertEqual(take.next_tick, 2)
+        self.assertEqual(load_timeline_take(source, dump_timeline_take(take)), take)
         with self.assertRaises(TimelineError):
             advance_timeline(source, take, listen=(), infer=infer)
 
@@ -73,6 +74,18 @@ class TimelineTests(unittest.TestCase):
         obj["cues"][0]["stream"] = "undeclared"
         with self.assertRaises(TimelineError):
             read_timeline(json.dumps(obj).encode())
+
+    def test_reopen_rejects_wrong_direction_and_out_of_order_records(self):
+        source = read_timeline(source_bytes())
+        take = advance_timeline(source, start_timeline(source), listen=(),
+                                infer=lambda _: (Record(0, "smoke", "Above the stove"),))
+        obj = json.loads(dump_timeline_take(take))
+        obj["sung"][0]["stream"] = "controller"
+        with self.assertRaises(TimelineError):
+            load_timeline_take(source, json.dumps(obj).encode())
+        obj["sung"] = [{"tick": 1, "stream": "smoke", "text": "future"}]
+        with self.assertRaises(TimelineError):
+            load_timeline_take(source, json.dumps(obj).encode())
 
 
 if __name__ == "__main__":
