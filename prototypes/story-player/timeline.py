@@ -28,6 +28,16 @@ class Cue:
 
 
 @dataclass(frozen=True)
+class Juncture:
+    tick: int
+    stream: str
+    options: tuple[str, ...]
+    default: str
+    fact: str
+    values: dict[str, str]
+
+
+@dataclass(frozen=True)
 class Timeline:
     id: str
     sha256: str
@@ -35,6 +45,8 @@ class Timeline:
     ticks: int
     streams: tuple[Stream, ...]
     cues: tuple[Cue, ...]
+    facts: dict[str, str]
+    junctures: tuple[Juncture, ...]
 
 
 @dataclass(frozen=True)
@@ -51,6 +63,8 @@ class Frame:
     listen: tuple[Record, ...]
     cues: tuple[Cue, ...]
     prior: tuple[Record, ...]
+    facts: dict[str, str]
+    choices: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -80,7 +94,7 @@ def read_timeline(raw: bytes) -> Timeline:
         raise TimelineError("invalid timeline bytes")
     try:
         obj = json.loads(raw.decode("utf-8"), object_pairs_hook=_pairs)
-        if not isinstance(obj, dict) or set(obj) != {"schema", "ticks", "streams", "cues"}:
+        if not isinstance(obj, dict) or not {"schema", "ticks", "streams", "cues"} <= set(obj) or set(obj) - {"schema", "ticks", "streams", "cues", "facts", "junctures"}:
             raise TimelineError("invalid timeline shape")
         if obj["schema"] != "thornfield.timeline.v1" or type(obj["ticks"]) is not int or not 1 <= obj["ticks"] <= 4096:
             raise TimelineError("invalid timeline header")
@@ -106,9 +120,32 @@ def read_timeline(raw: bytes) -> Timeline:
                 or not _name(item["prompt"])):
                 raise TimelineError("invalid cue")
             cues.append(Cue(**item))
+        facts = obj.get("facts", {})
+        if (not isinstance(facts, dict) or len(facts) > 64
+            or any(not _name(k) or not _name(v) for k, v in facts.items())):
+            raise TimelineError("invalid facts")
+        raw_junctures = obj.get("junctures", [])
+        if not isinstance(raw_junctures, list) or len(raw_junctures) > 128:
+            raise TimelineError("invalid junctures")
+        junctures = []
+        for item in raw_junctures:
+            if (not isinstance(item, dict) or set(item) != {"tick", "stream", "options", "default", "fact", "values"}
+                or type(item["tick"]) is not int or not 0 <= item["tick"] < obj["ticks"]
+                or item["stream"] not in by_id or by_id[item["stream"]].direction != "listen"
+                or not isinstance(item["options"], list) or not 2 <= len(item["options"]) <= 16
+                or any(not _name(option) for option in item["options"])
+                or len(set(item["options"])) != len(item["options"])
+                or item["default"] not in item["options"] or item["fact"] not in facts
+                or not isinstance(item["values"], dict) or set(item["values"]) != set(item["options"])
+                or any(not _name(value) for value in item["values"].values())):
+                raise TimelineError("invalid juncture")
+            junctures.append(Juncture(item["tick"], item["stream"], tuple(item["options"]),
+                                      item["default"], item["fact"], item["values"]))
+        if len({(j.tick, j.stream) for j in junctures}) != len(junctures):
+            raise TimelineError("duplicate juncture")
         digest = hashlib.sha256(raw).hexdigest()
         return Timeline("thornfield.timeline.v1:sha256:" + digest, digest, raw,
-                        obj["ticks"], tuple(streams), tuple(cues))
+                        obj["ticks"], tuple(streams), tuple(cues), facts, tuple(junctures))
     except (UnicodeError, ValueError, TypeError, KeyError, RecursionError) as exc:
         raise TimelineError("invalid timeline") from exc
 
@@ -155,6 +192,11 @@ def load_timeline_take(source: Timeline, raw: bytes) -> TimelineTake:
             if any(a.tick > b.tick for a, b in zip(records, records[1:])):
                 raise TimelineError("out-of-order take records")
             groups.append(tuple(records))
+        for juncture in source.junctures:
+            votes = [r.text for r in groups[0]
+                     if r.tick == juncture.tick and r.stream == juncture.stream]
+            if len(votes) > 1 or any(vote not in juncture.options for vote in votes):
+                raise TimelineError("invalid saved juncture input")
         return TimelineTake(source.id, obj["next_tick"], *groups)
     except (UnicodeError, ValueError, TypeError, KeyError, RecursionError) as exc:
         raise TimelineError("invalid take") from exc
@@ -175,8 +217,22 @@ def advance_timeline(source: Timeline, take: TimelineTake, *, listen: tuple[Reco
         for r in listen
     ):
         raise TimelineError("invalid listen-in records")
+    facts = dict(source.facts)
+    choices = []
+    for juncture in source.junctures:
+        if juncture.tick > take.next_tick:
+            continue
+        records = listen if juncture.tick == take.next_tick else take.listened
+        votes = [r.text for r in records if r.tick == juncture.tick and r.stream == juncture.stream]
+        if len(votes) > 1 or any(vote not in juncture.options for vote in votes):
+            raise TimelineError("invalid juncture input")
+        choice = votes[0] if votes else juncture.default
+        facts[juncture.fact] = juncture.values[choice]
+        if juncture.tick == take.next_tick:
+            choices.append((juncture.stream, choice))
     frame = Frame(source.id, take.next_tick, listen,
-                  tuple(c for c in source.cues if c.tick == take.next_tick), take.sung)
+                  tuple(c for c in source.cues if c.tick == take.next_tick), take.sung,
+                  facts, tuple(choices))
     emitted = infer(frame)
     if not isinstance(emitted, tuple) or any(
         not isinstance(r, Record) or r.tick != take.next_tick or r.stream not in declared

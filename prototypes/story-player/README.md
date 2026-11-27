@@ -54,6 +54,14 @@ inference function. That function receives one model-facing frame containing
 current input, authored cues, and prior emissions; it returns records on any
 declared sing-out streams. The same tick can emit several views of one event
 (for example, a character's action and the changing smoke in a kitchen).
+The source can also declare initial facts and choice junctures. Each juncture
+names a listen-in stream, offered options, a default for no answer, and the
+resulting fact value. A vote or default updates the shared facts *before* both
+sing-out views at that tick; a saved take replays the elected input, and later
+ticks reconstruct the same fact state. Invalid or duplicate votes refuse before
+inference. The test exercises a kitchen-window vote, the no-answer default,
+both outputs, and save/reopen continuation. The authored record is separate
+from the input/output take, so a new take need not rewrite the source.
 Takes save and reopen their exact elected input/output records without
 inference. The test exercises two outputs, a later controller input, source
 binding, wrong-direction refusal and save/reopen at this boundary. Run
@@ -62,8 +70,10 @@ binding, wrong-direction refusal and save/reopen at this boundary. Run
 This is **not** a real-time clock, game-controller transport, model provider,
 Canticle delivery, or evidence of model encounter. Stream declarations are
 data, not permissions; a caller must authorize actual listening and sending.
-No MP3 is decoded. A score or recording can be source material for an elected
-model-facing rendition, but this slice does not claim to have heard it.
+Facts and choices reach the inference boundary as data; this prototype does
+not prove that arbitrary model prose obeys them. The caller must validate or
+constrain semantic outputs before external emission. MP3 is not part of this
+timeline contract or required for native I/O.
 
 `audio_observation.py` is a first bounded media path: decode exact MP3 bytes
 with ffmpeg, measure four-second dynamics/spectral-centroid bins, and render

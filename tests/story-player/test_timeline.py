@@ -27,6 +27,41 @@ def source_bytes():
 
 
 class TimelineTests(unittest.TestCase):
+    def test_recorded_vote_or_declared_default_changes_shared_fact_for_both_outputs(self):
+        obj = json.loads(source_bytes())
+        obj["ticks"] = 3
+        obj["facts"] = {"window": "closed", "smoke": "in_kitchen"}
+        obj["junctures"] = [{"tick": 1, "stream": "controller",
+                              "options": ["open_window", "leave_closed"],
+                              "default": "leave_closed", "fact": "window",
+                              "values": {"open_window": "open", "leave_closed": "closed"}}]
+        source = read_timeline(json.dumps(obj).encode())
+
+        def infer(frame):
+            if frame.tick == 1:
+                self.assertEqual(frame.choices[0][1],
+                                 "open_window" if frame.facts["window"] == "open" else "leave_closed")
+            return (Record(frame.tick, "action", "window=" + frame.facts["window"]),
+                    Record(frame.tick, "smoke", "window=" + frame.facts["window"]))
+
+        first = advance_timeline(source, start_timeline(source), listen=(), infer=infer)
+        voted = advance_timeline(source, first,
+                                 listen=(Record(1, "controller", "open_window"),), infer=infer)
+        defaulted = advance_timeline(source, first, listen=(), infer=infer)
+        self.assertEqual([r.text for r in voted.sung[-2:]], ["window=open", "window=open"])
+        self.assertEqual([r.text for r in defaulted.sung[-2:]], ["window=closed", "window=closed"])
+        reopened = load_timeline_take(source, dump_timeline_take(voted))
+        continued = advance_timeline(source, reopened, listen=(), infer=infer)
+        self.assertEqual([r.text for r in continued.sung[-2:]], ["window=open", "window=open"])
+        for invalid in ((Record(1, "controller", "break_window"),),
+                        (Record(1, "controller", "open_window"), Record(1, "controller", "leave_closed"))):
+            with self.assertRaises(TimelineError):
+                advance_timeline(source, first, listen=invalid, infer=infer)
+        tampered = json.loads(dump_timeline_take(voted))
+        tampered["listened"][0]["text"] = "break_window"
+        with self.assertRaises(TimelineError):
+            load_timeline_take(source, json.dumps(tampered).encode())
+
     def test_two_sing_streams_and_one_listen_stream_reach_model_at_each_tick(self):
         source = read_timeline(source_bytes())
         seen = []
