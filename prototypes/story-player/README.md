@@ -64,6 +64,17 @@ Canticle delivery, or evidence of model encounter. Stream declarations are
 data, not permissions; a caller must authorize actual listening and sending.
 No MP3 is decoded. A score or recording can be source material for an elected
 model-facing rendition, but this slice does not claim to have heard it.
+
+`audio_observation.py` is a first bounded media path: decode exact MP3 bytes
+with ffmpeg, measure four-second dynamics/spectral-centroid bins, and render
+those measurements as a source-bound text record that a timeline may elect to
+listen to. The model-facing test generates a real MP3, decodes it, and passes
+the derived record into a timeline frame. This is **signal analysis**, not a
+transcript, semantic sound recognition or raw-audio model input. It cannot tell
+birds from rain; that limitation is explicit rather than filled by invention.
+Run `python3 tests/story-player/test_audio_observation.py -v` (requires ffmpeg
+and NumPy). A future audio-capable route could deliver the original bytes
+instead, with a distinct encounter receipt.
 The test includes Elliott's immutable 18-specimen/19-invocation byte corpus
 (`tests/story-player/fixtures/elliott-story-conformance-20261125.tar.gz`,
 SHA256 `f865e53f483b0a2e847cb7673559f0a0cc0755e7079008ef18751cd67dca386c`).
