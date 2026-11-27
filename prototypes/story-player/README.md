@@ -21,6 +21,10 @@ resumes at beat 6, and proves a fresh GIVEN take does not change the saved
 RETURNED take. This is **not** a Markdown capsule importer, a real audience
 ballot, or a live Beacon/Canticle delivery proof.
 
+Choice labels are source-bound only for `thornfield.story.v1` graph sources.
+For ordered cassettes, a `choice` is a free-text annotation, not a validated
+answer or evidence that the score's author offered that label.
+
 Run `python3 tests/story-player/test_player.py -v` from repository root.
 
 Rune's exact `thornfield.story.v1` JSON score is preserved separately at
