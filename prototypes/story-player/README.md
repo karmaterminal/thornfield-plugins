@@ -47,6 +47,14 @@ Run `python3 tests/story-player/test_story_reader.py -v` for this boundary.
 
 ## Elected timeline I/O slice
 
+**Design anchor:** [`PLAYER-CONTRACT.md`](PLAYER-CONTRACT.md) is the user story,
+record/workload contract, evolution gates, and agent guidance for this player.
+`workload.py` is the first executable dispatch slice: source-bound invocation,
+named channel bindings, authorized input callback, one inference frame, then
+save-before-send with deterministic delivery keys. Run
+`python3 tests/story-player/test_workload.py -v`. It uses injected callbacks;
+it is not a Temporal worker, a live Canticle sender, or a durable retry outbox.
+
 `timeline.py` adds a separate, exact-byte `thornfield.timeline.v1` source with
 named `listen` and `sing` streams and integer ticks. A caller explicitly
 advances each tick, supplies authorized listen-in records, and provides the
