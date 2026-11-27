@@ -44,6 +44,25 @@ not an auto-advance clock. Duration, speed and effects remain explicit
 integration gaps rather than silently executed from cue text.
 
 Run `python3 tests/story-player/test_story_reader.py -v` for this boundary.
+
+## Elected timeline I/O slice
+
+`timeline.py` adds a separate, exact-byte `thornfield.timeline.v1` source with
+named `listen` and `sing` streams and integer ticks. A caller explicitly
+advances each tick, supplies authorized listen-in records, and provides the
+inference function. That function receives one model-facing frame containing
+current input, authored cues, and prior emissions; it returns records on any
+declared sing-out streams. The same tick can emit several views of one event
+(for example, a character's action and the changing smoke in a kitchen).
+The test exercises two outputs, a later controller input, source binding, and
+wrong-direction refusal at this boundary. Run
+`python3 tests/story-player/test_timeline.py -v`.
+
+This is **not** a real-time clock, game-controller transport, model provider,
+Canticle delivery, or evidence of model encounter. Stream declarations are
+data, not permissions; a caller must authorize actual listening and sending.
+No MP3 is decoded. A score or recording can be source material for an elected
+model-facing rendition, but this slice does not claim to have heard it.
 The test includes Elliott's immutable 18-specimen/19-invocation byte corpus
 (`tests/story-player/fixtures/elliott-story-conformance-20261125.tar.gz`,
 SHA256 `f865e53f483b0a2e847cb7673559f0a0cc0755e7079008ef18751cd67dca386c`).
