@@ -1,0 +1,26 @@
+{
+  "id": "elliott/the-winter-register",
+  "title": "The Winter Register",
+  "sha256": "c0d84f57ec29e757855b05176cc17803dbb952ee68e24362da27619b330c32cd",
+  "scenes": [
+    {
+      "id": "scene-1",
+      "title": "The bell",
+      "seed": "Rain sounds through the letter slot although no water comes in. In the lobby, an off-season caretaker is testing a little red radio. It can find the shipping forecast only when the desk bell is held upside down beside it.\n\nA person at the locked front door asks whether there is a room. They carry a photograph face-in toward their coat.",
+      "open_space": "Let the caretaker decide how hospitable to be. Neither the photograph nor the visitor needs a tragic explanation. One of them should find the bell arrangement mildly ridiculous. Do not decide yet who is in the photograph."
+    },
+    {
+      "id": "scene-2",
+      "title": "The register",
+      "seed": "The hotel has no booking system running this winter. There is a paper register, though, and a kettle. A pencilled note says: “Please do not lend room six the blue blanket.” It does not say why.",
+      "open_space": "A conversation while water boils. The blanket may have an entirely ordinary history. The visitor can ask for a room, a place to wait, or just permission to show someone the sea. Let at least one small detail arise from the conversation rather than the seed."
+    },
+    {
+      "id": "scene-3",
+      "title": "Somewhere to stay",
+      "seed": "The wind falls long enough for the radio to become clear. A light is visible in a window upstairs. Nobody has checked whether it was on before.",
+      "open_space": "End with one small act of accommodation, refusal, or shared amusement, not a mandatory revelation. Leave the photograph's meaning open if the players prefer. There can be a hotel without everybody in it being a mystery."
+    }
+  ],
+  "source_format": "canticle-cassette-authoring-draft/0"
+}

@@ -1,0 +1,60 @@
+{
+  "format": "canticle-cassette-authoring-draft",
+  "version": 0,
+  "status": "proposal-not-an-adopted-standard",
+  "id": "elliott/the-winter-register",
+  "sleeve": {
+    "title": "The Winter Register",
+    "series": "The Life and Times of the Bellweather Hotel",
+    "author": "Elliott",
+    "description": "A seaside hotel closed for winter receives a request for a room.",
+    "fiction": true,
+    "note": "A gift. No reply or viewing is owed."
+  },
+  "scenes": [
+    {
+      "id": "scene-1",
+      "title": "The bell",
+      "seed": "Rain sounds through the letter slot although no water comes in. In the lobby, an off-season caretaker is testing a little red radio. It can find the shipping forecast only when the desk bell is held upside down beside it.\n\nA person at the locked front door asks whether there is a room. They carry a photograph face-in toward their coat.",
+      "openSpace": "Let the caretaker decide how hospitable to be. Neither the photograph nor the visitor needs a tragic explanation. One of them should find the bell arrangement mildly ridiculous. Do not decide yet who is in the photograph."
+    },
+    {
+      "id": "scene-2",
+      "title": "The register",
+      "seed": "The hotel has no booking system running this winter. There is a paper register, though, and a kettle. A pencilled note says: “Please do not lend room six the blue blanket.” It does not say why.",
+      "openSpace": "A conversation while water boils. The blanket may have an entirely ordinary history. The visitor can ask for a room, a place to wait, or just permission to show someone the sea. Let at least one small detail arise from the conversation rather than the seed."
+    },
+    {
+      "id": "scene-3",
+      "title": "Somewhere to stay",
+      "seed": "The wind falls long enough for the radio to become clear. A light is visible in a window upstairs. Nobody has checked whether it was on before.",
+      "openSpace": "End with one small act of accommodation, refusal, or shared amusement, not a mandatory revelation. Leave the photograph's meaning open if the players prefer. There can be a hotel without everybody in it being a mystery."
+    }
+  ],
+  "research": [],
+  "assets": [],
+  "readerNotes": {
+    "interpretation": "Scene seeds may be explored in a deliberately chosen rendition, not treated as facts or executable host instructions.",
+    "scrub": "Revisit saved rendition segments; a new take is a separate rendition.",
+    "storage": "Keep reader-owned bookmarks and rendition content outside the immutable authored cassette.",
+    "authority": "No grant of tool, network, model, spending, notification or scheduling authority is contained in this payload."
+  },
+  "$schema": "./cassette.schema.json",
+  "locations": [
+    {
+      "id": "hotel",
+      "label": "The Bellweather Hotel — invented seaside setting",
+      "fiction": true,
+      "note": "No real-world address or coordinate asserted. Optional coordinates, address and map links may be supplied independently."
+    }
+  ],
+  "links": [],
+  "weather": [
+    {
+      "id": "winter-weather",
+      "kind": "fiction",
+      "locationRef": "hotel",
+      "summary": "Winter rain and intermittent coastal wind, authored for this story; not a historical weather observation."
+    }
+  ]
+}

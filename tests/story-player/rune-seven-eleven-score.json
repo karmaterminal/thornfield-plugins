@@ -1,0 +1,181 @@
+{
+  "schema": "thornfield.story.v1",
+  "title": "The boy who walked to the 7-Eleven",
+  "opening": "The house sends a boy three quarters of a mile for milk. The road is quiet enough to count each step.",
+  "tempo": {
+    "seconds_per_beat": 30,
+    "meter": "walking; two steps per second; pause at each scene boundary"
+  },
+  "sleeve": {
+    "fiction": true,
+    "author": "Rune",
+    "note": "A scored walk, not a record of an actual errand.",
+    "series": "The Princes of Thornfield",
+    "description": "An authored, optional walk; no real errand or memory is asserted."
+  },
+  "research": [],
+  "assets": [],
+  "reader_notes": {
+    "authority": "Cues are proposals in the score, not permission for network access, physical action or publication. Keep participant words and performances separate from the immutable capsule.",
+    "interpretation": "Scene seeds and open spaces invite a chosen rendition; they are not evidence of real events.",
+    "storage": "Keep a take, participant answers, generated variations, and research outputs separate from this immutable score."
+  },
+  "start": "porch",
+  "scenes": [
+    {
+      "id": "porch",
+      "beat": 0,
+      "duration_beats": 2,
+      "open_space": "Who wrote the list is undecided. Let the player describe what the porch smells like.",
+      "cues": [
+        {
+          "at_beat": 1,
+          "type": "interaction",
+          "prompt": "Optional: ask the player what else is in his pocket; do not assert an answer for them.",
+          "id": "porch-cue-1"
+        }
+      ],
+      "choices": [
+        {
+          "label": "Read the list",
+          "next": "list"
+        },
+        {
+          "label": "Walk before the light changes",
+          "next": "road"
+        }
+      ],
+      "seed": "At the porch he checks his pockets: coins, a key, and a shopping list written in someone else's hand.",
+      "location_ref": "house/porch"
+    },
+    {
+      "id": "list",
+      "beat": 1,
+      "duration_beats": 1,
+      "choices": [
+        {
+          "label": "Follow the faint marks",
+          "next": "marks"
+        },
+        {
+          "label": "Leave it alone",
+          "next": "road"
+        }
+      ],
+      "seed": "Milk. Matches. A third item has been rubbed out, but the pressure of the pen remains.",
+      "location_ref": "house/steps"
+    },
+    {
+      "id": "marks",
+      "beat": 2,
+      "duration_beats": 1,
+      "next": "road",
+      "seed": "The erased word might be a name. It might be 'home'. No one here can tell him which.",
+      "location_ref": "house/steps"
+    },
+    {
+      "id": "road",
+      "beat": 3,
+      "duration_beats": 8,
+      "open_space": "The walk may accumulate observations without forcing a revelation.",
+      "cues": [
+        {
+          "at_beat": 2,
+          "type": "sound",
+          "prompt": "Optional night-road ambience; no automatic audio playback.",
+          "id": "road-cue-1"
+        },
+        {
+          "at_beat": 4,
+          "type": "research",
+          "prompt": "Optional web search for a local night sky or weather detail, only if explicitly enabled; never treat results as memory.",
+          "id": "road-cue-2",
+          "source": "optional-live"
+        },
+        {
+          "at_beat": 6,
+          "type": "picture",
+          "prompt": "Optional generated image of the distant storefront; save separately from the source score.",
+          "id": "road-cue-3"
+        }
+      ],
+      "choices": [
+        {
+          "label": "Buy only milk and matches",
+          "next": "counter"
+        },
+        {
+          "label": "Ask about the erased item",
+          "next": "clerk"
+        }
+      ],
+      "seed": "The 7-Eleven sign hums at the end of the road. Behind him, the house has one lit window.",
+      "location_ref": "road/three-quarter-mile"
+    },
+    {
+      "id": "clerk",
+      "beat": 4,
+      "duration_beats": 2,
+      "next": "counter",
+      "seed": "The clerk looks at the list, then at the boy. 'We don't sell that here anymore.'",
+      "location_ref": "store/counter"
+    },
+    {
+      "id": "counter",
+      "beat": 5,
+      "duration_beats": 2,
+      "next": "receipt",
+      "seed": "He pays for milk and matches. The register prints three items.",
+      "location_ref": "store/counter"
+    },
+    {
+      "id": "receipt",
+      "beat": 6,
+      "duration_beats": 4,
+      "open_space": "The receipt's meaning belongs to this take; a future take may disagree without rewriting it.",
+      "end": true,
+      "seed": "The third line is blank. The date is tomorrow. Outside, the house's lit window goes dark.",
+      "location_ref": "road/return"
+    }
+  ],
+  "locations": [
+    {
+      "id": "house/porch",
+      "label": "The house porch",
+      "fiction": true,
+      "note": "Invented story location; not a geocoded address."
+    },
+    {
+      "id": "house/steps",
+      "label": "The house steps",
+      "fiction": true,
+      "note": "Invented story location; not a geocoded address."
+    },
+    {
+      "id": "road/three-quarter-mile",
+      "label": "The road to the 7-Eleven",
+      "fiction": true,
+      "note": "Invented story location; not a geocoded address."
+    },
+    {
+      "id": "store/counter",
+      "label": "The store counter",
+      "fiction": true,
+      "note": "Invented story location; not a geocoded address."
+    },
+    {
+      "id": "road/return",
+      "label": "The return road",
+      "fiction": true,
+      "note": "Invented story location; not a geocoded address."
+    }
+  ],
+  "links": [],
+  "weather": [
+    {
+      "id": "walk-night",
+      "kind": "fiction",
+      "summary": "A quiet, cool night; not a historical observation."
+    }
+  ]
+}
